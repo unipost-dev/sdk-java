@@ -81,3 +81,19 @@ import dev.unipost.WebhookVerifier;
 
 boolean ok = WebhookVerifier.verifySignature(secret, payload, signatureHeader);
 ```
+
+## Publishing
+
+The repo is set up for Maven Central style releases through Gradle:
+
+- `./gradlew test` validates the SDK locally
+- `./gradlew publishToMavenLocal` installs a release candidate for source validation
+- pushing a `vX.Y.Z` tag triggers `.github/workflows/publish.yml`
+
+Required GitHub secrets for release:
+
+- `MAVEN_CENTRAL_DEPLOY_URL`
+- `MAVEN_CENTRAL_USERNAME`
+- `MAVEN_CENTRAL_PASSWORD`
+- `MAVEN_SIGNING_KEY`
+- `MAVEN_SIGNING_PASSWORD`

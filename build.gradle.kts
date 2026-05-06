@@ -1,6 +1,7 @@
 plugins {
     `java-library`
     `maven-publish`
+    signing
 }
 
 group = "dev.unipost"
@@ -27,6 +28,25 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
+}
+
+publishing {
+    repositories {
+        val releasesRepo = System.getenv("MAVEN_CENTRAL_DEPLOY_URL")
+            ?: findProperty("mavenCentralDeployUrl") as String?
+        if (!releasesRepo.isNullOrBlank()) {
+            maven {
+                name = "mavenCentral"
+                url = uri(releasesRepo)
+                credentials {
+                    username = System.getenv("MAVEN_CENTRAL_USERNAME")
+                        ?: findProperty("mavenCentralUsername") as String?
+                    password = System.getenv("MAVEN_CENTRAL_PASSWORD")
+                        ?: findProperty("mavenCentralPassword") as String?
+                }
+            }
+        }
+    }
 }
 
 publishing {
@@ -60,5 +80,17 @@ publishing {
                 }
             }
         }
+    }
+}
+
+signing {
+    val signingKey = System.getenv("ORG_GRADLE_PROJECT_signingKey")
+        ?: findProperty("signingKey") as String?
+    val signingPassword = System.getenv("ORG_GRADLE_PROJECT_signingPassword")
+        ?: findProperty("signingPassword") as String?
+
+    if (!signingKey.isNullOrBlank() && !signingPassword.isNullOrBlank()) {
+        useInMemoryPgpKeys(signingKey, signingPassword)
+        sign(publishing.publications["mavenJava"])
     }
 }
