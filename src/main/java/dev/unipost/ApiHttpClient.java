@@ -31,7 +31,7 @@ final class ApiHttpClient {
     private final String userAgent;
 
     ApiHttpClient(String apiKey, String baseUrl, Duration timeout) {
-        this(apiKey, baseUrl, HttpClient.newBuilder().connectTimeout(timeout).build(), "unipost-java/0.2.6");
+        this(apiKey, baseUrl, HttpClient.newBuilder().connectTimeout(timeout).build(), "unipost-java/0.2.7");
     }
 
     ApiHttpClient(String apiKey, String baseUrl, HttpClient httpClient, String userAgent) {
