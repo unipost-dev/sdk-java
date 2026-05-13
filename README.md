@@ -10,14 +10,14 @@ Maven:
 <dependency>
   <groupId>dev.unipost</groupId>
   <artifactId>sdk-java</artifactId>
-  <version>0.2.7</version>
+  <version>0.2.8</version>
 </dependency>
 ```
 
 Gradle:
 
 ```kotlin
-implementation("dev.unipost:sdk-java:0.2.7")
+implementation("dev.unipost:sdk-java:0.2.8")
 ```
 
 ## Quickstart
@@ -73,6 +73,18 @@ This keeps the SDK complete and stable while still feeling natural in Java.
 - webhooks
 - oauth
 - usage
+
+## Get Connect URL (Your Own Accounts)
+
+```java
+var connect = client.connect().getConnectUrl(Map.of(
+    "profile_id", "pr_brand_us",
+    "platform", "linkedin",
+    "redirect_url", "https://app.acme.com/integrations/done" // optional
+));
+
+System.out.println(connect.get("auth_url").asText());
+```
 
 ## Webhook verification
 
