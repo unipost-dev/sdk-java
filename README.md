@@ -10,14 +10,14 @@ Maven:
 <dependency>
   <groupId>dev.unipost</groupId>
   <artifactId>sdk-java</artifactId>
-  <version>0.2.8</version>
+  <version>0.2.9</version>
 </dependency>
 ```
 
 Gradle:
 
 ```kotlin
-implementation("dev.unipost:sdk-java:0.2.8")
+implementation("dev.unipost:sdk-java:0.2.9")
 ```
 
 ## Quickstart
@@ -84,6 +84,21 @@ var connect = client.connect().getConnectUrl(Map.of(
 ));
 
 System.out.println(connect.get("auth_url").asText());
+```
+
+## Connect (Managed Users)
+
+```java
+var request = new java.util.HashMap<>(Map.of(
+    "platform", "twitter",
+    "external_user_id", "your_user_123",
+    "return_url", "https://yourapp.com/callback"
+)));
+request.put("allow_quickstart_creds", true); // optional
+
+var session = client.connect().createSession(request);
+
+System.out.println(session.get("url").asText());
 ```
 
 ## Webhook verification

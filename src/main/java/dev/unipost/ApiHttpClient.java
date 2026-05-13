@@ -31,7 +31,7 @@ final class ApiHttpClient {
     private final String userAgent;
 
     ApiHttpClient(String apiKey, String baseUrl, Duration timeout) {
-        this(apiKey, baseUrl, HttpClient.newBuilder().connectTimeout(timeout).build(), "unipost-java/0.2.7");
+        this(apiKey, baseUrl, HttpClient.newBuilder().connectTimeout(timeout).build(), "unipost-java/0.2.9");
     }
 
     ApiHttpClient(String apiKey, String baseUrl, HttpClient httpClient, String userAgent) {
@@ -99,7 +99,8 @@ final class ApiHttpClient {
             JsonNode json = raw.isBlank() ? MAPPER.nullNode() : MAPPER.readTree(raw);
 
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                String code = textAt(json, "error.code");
+                String code = textAt(json, "error.normalized_code");
+                if (code == null) code = textAt(json, "error.code");
                 if (code == null) code = textAt(json, "code");
                 String message = textAt(json, "error.message");
                 if (message == null) message = textAt(json, "message");
