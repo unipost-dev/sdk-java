@@ -411,16 +411,7 @@ public final class UniPost {
         ConnectResource(ApiHttpClient http) { super(http); }
 
         public JsonNode getConnectUrl(Map<String, ?> params) {
-            String profileId = String.valueOf(params.get("profile_id"));
-            String platform = String.valueOf(params.get("platform"));
-
-            Map<String, Object> query = new java.util.LinkedHashMap<>();
-            Object redirectUrl = params.get("redirect_url");
-            if (redirectUrl != null && !String.valueOf(redirectUrl).isBlank()) {
-                query.put("redirect_url", redirectUrl);
-            }
-
-            return data(http.get("/v1/profiles/" + profileId + "/oauth/connect/" + platform, query.isEmpty() ? null : query));
+            return data(http.post("/v1/oauth/connect", params));
         }
 
         public JsonNode createSession(Map<String, Object> body) {
@@ -480,7 +471,12 @@ public final class UniPost {
         }
 
         public JsonNode connect(String platform, Map<String, ?> params) {
-            return data(http.get("/v1/oauth/connect/" + platform, params));
+            Map<String, Object> body = new java.util.LinkedHashMap<>();
+            body.put("platform", platform);
+            if (params != null) {
+                body.putAll(params);
+            }
+            return data(http.post("/v1/oauth/connect", body));
         }
     }
 
