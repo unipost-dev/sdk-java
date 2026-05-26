@@ -49,6 +49,10 @@ final class ApiHttpClient {
         return send("GET", path, query, null, Collections.emptyMap());
     }
 
+    String getText(String path, Map<String, ?> query) {
+        return sendText("GET", path, query, Collections.emptyMap());
+    }
+
     JsonNode post(String path) {
         return post(path, null, Collections.emptyMap());
     }
@@ -112,6 +116,45 @@ final class ApiHttpClient {
             throw e;
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("Failed to encode/decode JSON", e);
+        } catch (IOException | InterruptedException e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            throw new IllegalStateException("UniPost request failed", e);
+        }
+    }
+
+    String sendText(String method, String path, Map<String, ?> query, Map<String, String> extraHeaders) {
+        try {
+            HttpRequest.Builder builder = HttpRequest.newBuilder()
+                    .uri(URI.create(baseUrl + path + buildQuery(query)))
+                    .header("Authorization", "Bearer " + apiKey)
+                    .header("User-Agent", userAgent)
+                    .method(method, HttpRequest.BodyPublishers.noBody());
+
+            for (Map.Entry<String, String> entry : extraHeaders.entrySet()) {
+                if (entry.getValue() != null) {
+                    builder.header(entry.getKey(), entry.getValue());
+                }
+            }
+
+            HttpResponse<String> response = httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                String requestId = response.headers().firstValue("X-Request-Id").orElse(null);
+                String raw = response.body() == null ? "" : response.body();
+                JsonNode json = raw.isBlank() ? MAPPER.nullNode() : MAPPER.readTree(raw);
+                String code = textAt(json, "error.normalized_code");
+                if (code == null) code = textAt(json, "error.code");
+                if (code == null) code = textAt(json, "code");
+                String message = textAt(json, "error.message");
+                if (message == null) message = textAt(json, "message");
+                throw new APIError(response.statusCode(), code, message, requestId, raw);
+            }
+            return response.body() == null ? "" : response.body();
+        } catch (APIError e) {
+            throw e;
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Failed to decode JSON error", e);
         } catch (IOException | InterruptedException e) {
             if (e instanceof InterruptedException) {
                 Thread.currentThread().interrupt();

@@ -405,6 +405,26 @@ public final class UniPost {
         public JsonNode rollup(Map<String, ?> params) {
             return data(http.get("/v1/analytics/rollup", params));
         }
+
+        public Page<JsonNode> posts(Map<String, ?> params) {
+            return page(http.get("/v1/analytics/posts", params));
+        }
+
+        public String exportPostsCsv(Map<String, ?> params) {
+            return http.getText("/v1/analytics/posts/export", params);
+        }
+
+        public List<JsonNode> platforms(Map<String, ?> params) {
+            return dataList(http.get("/v1/analytics/platforms", params));
+        }
+
+        public JsonNode platform(String platform, Map<String, ?> params) {
+            return data(http.get("/v1/analytics/platforms/" + platform, params));
+        }
+
+        public JsonNode refresh(Map<String, ?> body) {
+            return data(http.post("/v1/analytics/refresh", body));
+        }
     }
 
     public static final class ConnectResource extends Resource {

@@ -100,6 +100,85 @@ class ResourceRequestTest {
         assertEquals("/v1/platforms/capabilities", request.getPath());
     }
 
+    @Test
+    void listsAnalyticsPostsWithExplorerFilters() throws Exception {
+        server.enqueue(jsonResponse("{\"data\":[{\"post_id\":\"post_1\",\"platform\":\"pinterest\"}],\"meta\":{\"next_cursor\":\"25\"}}"));
+
+        Page<JsonNode> result = client.analytics().posts(Map.of(
+                "platform", "pinterest",
+                "account_id", "sa_1",
+                "post_id", "post_1",
+                "sort", "engagement_rate",
+                "limit", 25,
+                "cursor", "0"
+        ));
+
+        assertEquals("post_1", result.getData().get(0).path("post_id").asText());
+        assertEquals("25", result.getNextCursor());
+
+        RecordedRequest request = server.takeRequest();
+        assertTrue(request.getPath().contains("/v1/analytics/posts"));
+        assertTrue(request.getPath().contains("platform=pinterest"));
+        assertTrue(request.getPath().contains("account_id=sa_1"));
+        assertTrue(request.getPath().contains("post_id=post_1"));
+        assertTrue(request.getPath().contains("sort=engagement_rate"));
+        assertTrue(request.getPath().contains("limit=25"));
+        assertTrue(request.getPath().contains("cursor=0"));
+    }
+
+    @Test
+    void exportsAnalyticsPostsAsCsvText() throws Exception {
+        server.enqueue(new MockResponse()
+                .setResponseCode(200)
+                .addHeader("Content-Type", "text/csv")
+                .setBody("post_id,platform\npost_1,tiktok\n"));
+
+        String csv = client.analytics().exportPostsCsv(Map.of("platform", "tiktok"));
+
+        assertTrue(csv.contains("post_id,platform"));
+        RecordedRequest request = server.takeRequest();
+        assertTrue(request.getPath().contains("/v1/analytics/posts/export"));
+        assertTrue(request.getPath().contains("platform=tiktok"));
+    }
+
+    @Test
+    void readsAnalyticsPlatformAvailabilityAndDetails() throws Exception {
+        server.enqueue(jsonResponse("{\"data\":[{\"platform\":\"tiktok\",\"health\":\"ready\"}]}"));
+        server.enqueue(jsonResponse("{\"data\":{\"platform\":\"tiktok\",\"summary\":{\"posts\":3}}}"));
+
+        List<JsonNode> platforms = client.analytics().platforms(Map.of("from", "2026-05-01", "to", "2026-05-31"));
+        JsonNode platform = client.analytics().platform("tiktok", Map.of("profile_id", "prof_1"));
+
+        assertEquals("tiktok", platforms.get(0).path("platform").asText());
+        assertEquals(3, platform.path("summary").path("posts").asInt());
+
+        RecordedRequest listRequest = server.takeRequest();
+        RecordedRequest detailRequest = server.takeRequest();
+        assertTrue(listRequest.getPath().contains("/v1/analytics/platforms"));
+        assertTrue(listRequest.getPath().contains("from=2026-05-01"));
+        assertTrue(detailRequest.getPath().contains("/v1/analytics/platforms/tiktok"));
+        assertTrue(detailRequest.getPath().contains("profile_id=prof_1"));
+    }
+
+    @Test
+    void requestsAnalyticsRefresh() throws Exception {
+        server.enqueue(new MockResponse()
+                .setResponseCode(202)
+                .addHeader("Content-Type", "application/json")
+                .setBody("{\"data\":{\"status\":\"queued\",\"matched_count\":7,\"requested_count\":5,\"limit\":5}}"));
+
+        JsonNode result = client.analytics().refresh(Map.of("platform", "threads", "limit", 5));
+
+        assertEquals("queued", result.path("status").asText());
+        assertEquals(5, result.path("requested_count").asInt());
+        RecordedRequest request = server.takeRequest();
+        assertEquals("POST", request.getMethod());
+        assertEquals("/v1/analytics/refresh", request.getPath());
+        String body = request.getBody().readUtf8();
+        assertTrue(body.contains("\"platform\":\"threads\""));
+        assertTrue(body.contains("\"limit\":5"));
+    }
+
     private static MockResponse jsonResponse(String body) {
         return new MockResponse()
                 .setResponseCode(200)

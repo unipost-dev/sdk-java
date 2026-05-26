@@ -74,6 +74,25 @@ This keeps the SDK complete and stable while still feeling natural in Java.
 - oauth
 - usage
 
+## Analytics Explorer
+
+```java
+Page<JsonNode> posts = client.analytics().posts(Map.of(
+    "platform", "tiktok",
+    "limit", 25,
+    "sort", "engagement_rate"
+));
+
+List<JsonNode> platforms = client.analytics().platforms(Map.of());
+JsonNode tiktok = client.analytics().platform("tiktok", Map.of());
+String csv = client.analytics().exportPostsCsv(Map.of("platform", "pinterest"));
+
+client.analytics().refresh(Map.of(
+    "platform", "threads",
+    "limit", 100
+));
+```
+
 ## Get Connect URL (Your Own Accounts)
 
 ```java
