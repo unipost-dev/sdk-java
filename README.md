@@ -10,14 +10,14 @@ Maven:
 <dependency>
   <groupId>dev.unipost</groupId>
   <artifactId>sdk-java</artifactId>
-  <version>0.2.9</version>
+  <version>0.3.0</version>
 </dependency>
 ```
 
 Gradle:
 
 ```kotlin
-implementation("dev.unipost:sdk-java:0.2.9")
+implementation("dev.unipost:sdk-java:0.3.0")
 ```
 
 ## Quickstart

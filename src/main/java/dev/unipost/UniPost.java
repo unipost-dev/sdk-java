@@ -11,7 +11,7 @@ import java.util.Objects;
 public final class UniPost {
     public static final String DEFAULT_BASE_URL = "https://api.unipost.dev";
     public static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(30);
-    public static final String SDK_VERSION = "0.2.9";
+    public static final String SDK_VERSION = "0.3.0";
 
     private final ApiHttpClient http;
 
