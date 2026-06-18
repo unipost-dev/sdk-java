@@ -2,7 +2,7 @@
 
 Official Java client for the UniPost API.
 
-## Latest release: v0.3.0
+## Latest release: v0.4.0
 
 Analytics Explorer and Developer Logs APIs are now available in this SDK.
 
