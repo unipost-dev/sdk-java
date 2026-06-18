@@ -179,6 +179,65 @@ class ResourceRequestTest {
         assertTrue(body.contains("\"limit\":5"));
     }
 
+    @Test
+    void listsLogsWithCursorFilters() throws Exception {
+        server.enqueue(jsonResponse("{\"data\":[{\"id\":110,\"action\":\"post.publish.failed\",\"status\":\"error\"}],\"meta\":{\"limit\":25,\"has_more\":true,\"next_cursor\":\"cur_abc\"}}"));
+
+        Page<JsonNode> result = client.logs().list(Map.of(
+                "status", "error",
+                "level", "warn",
+                "profile_id", "prof_1",
+                "error_code", "provider_failed",
+                "limit", 25,
+                "cursor", "cur_prev"
+        ));
+
+        assertEquals(110, result.getData().get(0).path("id").asLong());
+        assertEquals("cur_abc", result.getNextCursor());
+
+        RecordedRequest request = server.takeRequest();
+        assertTrue(request.getPath().contains("/v1/logs"));
+        assertTrue(request.getPath().contains("status=error"));
+        assertTrue(request.getPath().contains("level=warn"));
+        assertTrue(request.getPath().contains("profile_id=prof_1"));
+        assertTrue(request.getPath().contains("error_code=provider_failed"));
+        assertTrue(request.getPath().contains("limit=25"));
+        assertTrue(request.getPath().contains("cursor=cur_prev"));
+    }
+
+    @Test
+    void getsSingleLogById() throws Exception {
+        server.enqueue(jsonResponse("{\"data\":{\"id\":110,\"action\":\"post.publish.failed\",\"request_payload\":null}}"));
+
+        JsonNode log = client.logs().get(110);
+
+        assertEquals(110, log.path("id").asLong());
+        assertEquals("post.publish.failed", log.path("action").asText());
+        RecordedRequest request = server.takeRequest();
+        assertEquals("/v1/logs/110", request.getPath());
+    }
+
+    @Test
+    void streamsSseLogCreatedEvents() throws Exception {
+        server.enqueue(new MockResponse()
+                .setResponseCode(200)
+                .addHeader("Content-Type", "text/event-stream")
+                .setBody("event: log.created\nid: 110\ndata: {\"id\":110,\"action\":\"post.publish.failed\",\"status\":\"error\"}\n\n"));
+
+        try (LogStream stream = client.logs().stream(Map.of("status", "error", "after_id", 109))) {
+            assertTrue(stream.next());
+            assertEquals("110", stream.id());
+            assertEquals("log.created", stream.eventName());
+            assertEquals(110, stream.event().path("id").asLong());
+        }
+
+        RecordedRequest request = server.takeRequest();
+        assertTrue(request.getPath().contains("/v1/logs/stream"));
+        assertTrue(request.getPath().contains("status=error"));
+        assertTrue(request.getPath().contains("after_id=109"));
+        assertEquals("text/event-stream", request.getHeader("Accept"));
+    }
+
     private static MockResponse jsonResponse(String body) {
         return new MockResponse()
                 .setResponseCode(200)

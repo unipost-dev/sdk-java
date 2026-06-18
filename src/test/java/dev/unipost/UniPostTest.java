@@ -36,5 +36,6 @@ class UniPostTest {
         assertNotNull(client.webhooks());
         assertNotNull(client.platformCredentials());
         assertNotNull(client.deliveryJobs());
+        assertNotNull(client.logs());
     }
 }

@@ -4,12 +4,14 @@ Official Java client for the UniPost API.
 
 ## Latest release: v0.3.0
 
-Analytics Explorer APIs are now available in this SDK.
+Analytics Explorer and Developer Logs APIs are now available in this SDK.
 
 - Query post-level analytics with filters and sorting.
 - Export analytics rows as CSV for reporting workflows.
 - Inspect platform analytics availability and metric summaries.
 - Trigger analytics refresh jobs for supported platforms.
+- Backfill workspace developer logs with cursor pagination.
+- Stream near-real-time logs with Server-Sent Events replay.
 
 Supported analytics surfaces include Instagram, Threads, Pinterest, and TikTok when connected account permissions allow them. See `Analytics Explorer` below for code.
 
@@ -84,6 +86,7 @@ This keeps the SDK complete and stable while still feeling natural in Java.
 - webhooks
 - oauth
 - usage
+- logs
 
 ## Analytics Explorer
 
@@ -102,6 +105,29 @@ client.analytics().refresh(Map.of(
     "platform", "threads",
     "limit", 100
 ));
+```
+
+## Developer Logs
+
+```java
+Page<JsonNode> logs = client.logs().list(Map.of(
+    "status", "error",
+    "limit", 50
+));
+
+if (!logs.getData().isEmpty()) {
+    JsonNode log = client.logs().get(logs.getData().get(0).path("id").asLong());
+    System.out.println(log.path("action").asText());
+}
+
+try (LogStream stream = client.logs().stream(Map.of(
+    "status", "error",
+    "after_id", logs.getData().isEmpty() ? 0 : logs.getData().get(0).path("id").asLong() - 1
+))) {
+    if (stream.next()) {
+        System.out.println(stream.event().path("action").asText());
+    }
+}
 ```
 
 ## Get Connect URL (Your Own Accounts)

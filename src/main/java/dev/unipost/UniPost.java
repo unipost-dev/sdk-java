@@ -31,6 +31,7 @@ public final class UniPost {
     private final WebhooksResource webhooks;
     private final OAuthResource oauth;
     private final UsageResource usage;
+    private final LogsResource logs;
 
     public UniPost() {
         this(builder());
@@ -67,6 +68,7 @@ public final class UniPost {
         this.webhooks = new WebhooksResource(http);
         this.oauth = new OAuthResource(http);
         this.usage = new UsageResource(http);
+        this.logs = new LogsResource(http);
     }
 
     public static Builder builder() {
@@ -89,6 +91,7 @@ public final class UniPost {
     public WebhooksResource webhooks() { return webhooks; }
     public OAuthResource oauth() { return oauth; }
     public UsageResource usage() { return usage; }
+    public LogsResource logs() { return logs; }
 
     public static final class Builder {
         private String apiKey;
@@ -505,6 +508,30 @@ public final class UniPost {
 
         public JsonNode get() {
             return data(http.get("/v1/usage"));
+        }
+    }
+
+    public static final class LogsResource extends Resource {
+        LogsResource(ApiHttpClient http) { super(http); }
+
+        public Page<JsonNode> list() {
+            return list(null);
+        }
+
+        public Page<JsonNode> list(Map<String, ?> params) {
+            return page(http.get("/v1/logs", params));
+        }
+
+        public JsonNode get(long logId) {
+            return data(http.get("/v1/logs/" + logId));
+        }
+
+        public LogStream stream() {
+            return stream(null);
+        }
+
+        public LogStream stream(Map<String, ?> params) {
+            return new LogStream(http.stream("/v1/logs/stream", params, Map.of()));
         }
     }
 }

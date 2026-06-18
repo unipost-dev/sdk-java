@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
@@ -51,6 +52,47 @@ final class ApiHttpClient {
 
     String getText(String path, Map<String, ?> query) {
         return sendText("GET", path, query, Collections.emptyMap());
+    }
+
+    InputStream stream(String path, Map<String, ?> query, Map<String, String> extraHeaders) {
+        try {
+            HttpRequest.Builder builder = HttpRequest.newBuilder()
+                    .uri(URI.create(baseUrl + path + buildQuery(query)))
+                    .header("Authorization", "Bearer " + apiKey)
+                    .header("Accept", "text/event-stream")
+                    .header("User-Agent", userAgent)
+                    .GET();
+
+            for (Map.Entry<String, String> entry : extraHeaders.entrySet()) {
+                if (entry.getValue() != null) {
+                    builder.header(entry.getKey(), entry.getValue());
+                }
+            }
+
+            HttpResponse<InputStream> response = httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofInputStream());
+            if (response.statusCode() >= 200 && response.statusCode() < 300) {
+                return response.body();
+            }
+
+            String requestId = response.headers().firstValue("X-Request-Id").orElse(null);
+            String raw = new String(response.body().readAllBytes(), StandardCharsets.UTF_8);
+            JsonNode json = raw.isBlank() ? MAPPER.nullNode() : MAPPER.readTree(raw);
+            String code = textAt(json, "error.normalized_code");
+            if (code == null) code = textAt(json, "error.code");
+            if (code == null) code = textAt(json, "code");
+            String message = textAt(json, "error.message");
+            if (message == null) message = textAt(json, "message");
+            throw new APIError(response.statusCode(), code, message, requestId, raw);
+        } catch (APIError e) {
+            throw e;
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Failed to decode JSON error", e);
+        } catch (IOException | InterruptedException e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            throw new IllegalStateException("UniPost request failed", e);
+        }
     }
 
     JsonNode post(String path) {
