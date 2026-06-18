@@ -5,7 +5,7 @@
 
   <groupId>dev.unipost</groupId>
   <artifactId>sdk-java</artifactId>
-  <version>0.3.0</version>
+  <version>0.4.0</version>
   <name>UniPost Java SDK</name>
   <description>Official UniPost API client for Java</description>
   <url>https://unipost.dev/docs</url>
