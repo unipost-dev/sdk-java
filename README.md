@@ -2,18 +2,14 @@
 
 Official Java client for the UniPost API.
 
-## Latest release: v0.4.0
+## Latest release: v0.4.1
 
-Analytics Explorer and Developer Logs APIs are now available in this SDK.
+Post failure responses now include error contract fields in returned `JsonNode`
+objects.
 
-- Query post-level analytics with filters and sorting.
-- Export analytics rows as CSV for reporting workflows.
-- Inspect platform analytics availability and metric summaries.
-- Trigger analytics refresh jobs for supported platforms.
-- Backfill workspace developer logs with cursor pagination.
-- Stream near-real-time logs with Server-Sent Events replay.
-
-Supported analytics surfaces include Instagram, Threads, Pinterest, and TikTok when connected account permissions allow them. See `Analytics Explorer` below for code.
+- Read `error_source` and `error_temporality` to distinguish UniPost, worker, platform, and unknown failures.
+- Inspect sanitized `provider_error` details when a platform returns structured metadata.
+- Use `retry_policy.will_retry` and `retry_policy.manual_retry_allowed` instead of parsing `error_message`.
 
 ## Install
 
@@ -23,14 +19,14 @@ Maven:
 <dependency>
   <groupId>dev.unipost</groupId>
   <artifactId>sdk-java</artifactId>
-  <version>0.4.0</version>
+  <version>0.4.1</version>
 </dependency>
 ```
 
 Gradle:
 
 ```kotlin
-implementation("dev.unipost:sdk-java:0.4.0")
+implementation("dev.unipost:sdk-java:0.4.1")
 ```
 
 ## Quickstart
