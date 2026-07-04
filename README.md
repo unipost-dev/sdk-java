@@ -2,14 +2,15 @@
 
 Official Java client for the UniPost API.
 
-## Latest release: v0.4.1
+## Latest release: v0.5.0
 
-Post failure responses now include error contract fields in returned `JsonNode`
-objects.
+Media uploads now support custom audio overlay jobs and optional reserve-time
+file sizes.
 
-- Read `error_source` and `error_temporality` to distinguish UniPost, worker, platform, and unknown failures.
-- Inspect sanitized `provider_error` details when a platform returns structured metadata.
-- Use `retry_policy.will_retry` and `retry_policy.manual_retry_allowed` instead of parsing `error_message`.
+- Use `client.media().audioOverlays().create(...)` to combine one uploaded video with one uploaded audio file.
+- Poll the job with `client.media().audioOverlays().get(...)`, then publish the returned `output_media_id`.
+- Omit `size_bytes` when reserving media if your app cannot know the raw file length up front.
+- Post failure responses also include the typed v0.4.1 error contract fields.
 
 ## Install
 
@@ -19,14 +20,14 @@ Maven:
 <dependency>
   <groupId>dev.unipost</groupId>
   <artifactId>sdk-java</artifactId>
-  <version>0.4.1</version>
+  <version>0.5.0</version>
 </dependency>
 ```
 
 Gradle:
 
 ```kotlin
-implementation("dev.unipost:sdk-java:0.4.1")
+implementation("dev.unipost:sdk-java:0.5.0")
 ```
 
 ## Quickstart
@@ -124,6 +125,45 @@ try (LogStream stream = client.logs().stream(Map.of(
         System.out.println(stream.event().path("action").asText());
     }
 }
+```
+
+## Media upload
+
+```java
+var media = client.media().upload(Map.of(
+    "filename", "voiceover.mp3",
+    "content_type", "audio/mpeg"
+    // size_bytes is optional
+));
+
+System.out.println(media.path("id").asText());
+```
+
+## Custom audio overlay
+
+```java
+var job = client.media().audioOverlays().create(Map.of(
+    "video_media_id", "media_video_123",
+    "audio_media_id", "media_audio_456",
+    "mode", "mix",
+    "fit", "trim_to_video"
+), "overlay-demo-001");
+
+while (job.path("status").asText().equals("queued") ||
+       job.path("status").asText().equals("processing")) {
+    Thread.sleep(1500);
+    job = client.media().audioOverlays().get(job.path("id").asText());
+}
+
+if (!job.path("status").asText().equals("succeeded")) {
+    throw new IllegalStateException("audio overlay failed");
+}
+
+client.posts().create(Map.of(
+    "caption", "Video with custom audio",
+    "account_ids", List.of("sa_tiktok_xxx"),
+    "media_ids", List.of(job.path("output_media_id").asText())
+));
 ```
 
 ## Get Connect URL (Your Own Accounts)

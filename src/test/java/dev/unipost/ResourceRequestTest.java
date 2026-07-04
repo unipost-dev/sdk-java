@@ -180,6 +180,60 @@ class ResourceRequestTest {
     }
 
     @Test
+    void reservesMediaWithoutRequiredSizeBytes() throws Exception {
+        server.enqueue(jsonResponse("{\"data\":{\"id\":\"media_audio_1\",\"status\":\"reserved\",\"upload_url\":\"https://upload.example/audio\"}}"));
+
+        JsonNode media = client.media().upload(Map.of(
+                "filename", "voiceover.mp3",
+                "content_type", "audio/mpeg"
+        ));
+
+        assertEquals("media_audio_1", media.path("id").asText());
+        RecordedRequest request = server.takeRequest();
+        assertEquals("POST", request.getMethod());
+        assertEquals("/v1/media", request.getPath());
+        String body = request.getBody().readUtf8();
+        assertTrue(body.contains("\"filename\":\"voiceover.mp3\""));
+        assertTrue(body.contains("\"content_type\":\"audio/mpeg\""));
+        assertFalse(body.contains("size_bytes"));
+    }
+
+    @Test
+    void createsAudioOverlayWithIdempotency() throws Exception {
+        server.enqueue(new MockResponse()
+                .setResponseCode(202)
+                .addHeader("Content-Type", "application/json")
+                .setBody("{\"data\":{\"id\":\"mpj_1\",\"status\":\"queued\",\"video_media_id\":\"media_video_1\",\"audio_media_id\":\"media_audio_1\",\"output_media_id\":null,\"mode\":\"mix\",\"fit\":\"trim_to_video\",\"created_at\":\"2026-07-03T12:00:00Z\"}}"));
+
+        JsonNode job = client.media().audioOverlays().create(Map.of(
+                "video_media_id", "media_video_1",
+                "audio_media_id", "media_audio_1",
+                "mode", "mix",
+                "fit", "trim_to_video"
+        ), "overlay-1");
+
+        assertEquals("mpj_1", job.path("id").asText());
+        RecordedRequest request = server.takeRequest();
+        assertEquals("POST", request.getMethod());
+        assertEquals("/v1/media/audio-overlays", request.getPath());
+        assertEquals("overlay-1", request.getHeader("Idempotency-Key"));
+        String body = request.getBody().readUtf8();
+        assertTrue(body.contains("\"video_media_id\":\"media_video_1\""));
+        assertTrue(body.contains("\"audio_media_id\":\"media_audio_1\""));
+    }
+
+    @Test
+    void getsAudioOverlayJob() throws Exception {
+        server.enqueue(jsonResponse("{\"data\":{\"id\":\"mpj_1\",\"status\":\"succeeded\",\"output_media_id\":\"media_output_1\"}}"));
+
+        JsonNode job = client.media().audioOverlays().get("mpj_1");
+
+        assertEquals("media_output_1", job.path("output_media_id").asText());
+        RecordedRequest request = server.takeRequest();
+        assertEquals("/v1/media/audio-overlays/mpj_1", request.getPath());
+    }
+
+    @Test
     void listsLogsWithCursorFilters() throws Exception {
         server.enqueue(jsonResponse("{\"data\":[{\"id\":110,\"action\":\"post.publish.failed\",\"status\":\"error\"}],\"meta\":{\"limit\":25,\"has_more\":true,\"next_cursor\":\"cur_abc\"}}"));
 
