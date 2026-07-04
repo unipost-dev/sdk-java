@@ -2,18 +2,15 @@
 
 Official Java client for the UniPost API.
 
-## Latest release: v0.4.0
+## Latest release: v0.5.0
 
-Analytics Explorer and Developer Logs APIs are now available in this SDK.
+Media uploads now support custom audio overlay jobs and optional reserve-time
+file sizes.
 
-- Query post-level analytics with filters and sorting.
-- Export analytics rows as CSV for reporting workflows.
-- Inspect platform analytics availability and metric summaries.
-- Trigger analytics refresh jobs for supported platforms.
-- Backfill workspace developer logs with cursor pagination.
-- Stream near-real-time logs with Server-Sent Events replay.
-
-Supported analytics surfaces include Instagram, Threads, Pinterest, and TikTok when connected account permissions allow them. See `Analytics Explorer` below for code.
+- Use `client.media().audioOverlays().create(...)` to combine one uploaded video with one uploaded audio file.
+- Poll the job with `client.media().audioOverlays().get(...)`, then publish the returned `output_media_id`.
+- Omit `size_bytes` when reserving media if your app cannot know the raw file length up front.
+- Post failure responses also include the typed v0.4.1 error contract fields.
 
 ## Install
 
@@ -23,14 +20,14 @@ Maven:
 <dependency>
   <groupId>dev.unipost</groupId>
   <artifactId>sdk-java</artifactId>
-  <version>0.4.0</version>
+  <version>0.5.0</version>
 </dependency>
 ```
 
 Gradle:
 
 ```kotlin
-implementation("dev.unipost:sdk-java:0.4.0")
+implementation("dev.unipost:sdk-java:0.5.0")
 ```
 
 ## Quickstart
@@ -128,6 +125,45 @@ try (LogStream stream = client.logs().stream(Map.of(
         System.out.println(stream.event().path("action").asText());
     }
 }
+```
+
+## Media upload
+
+```java
+var media = client.media().upload(Map.of(
+    "filename", "voiceover.mp3",
+    "content_type", "audio/mpeg"
+    // size_bytes is optional
+));
+
+System.out.println(media.path("id").asText());
+```
+
+## Custom audio overlay
+
+```java
+var job = client.media().audioOverlays().create(Map.of(
+    "video_media_id", "media_video_123",
+    "audio_media_id", "media_audio_456",
+    "mode", "mix",
+    "fit", "trim_to_video"
+), "overlay-demo-001");
+
+while (job.path("status").asText().equals("queued") ||
+       job.path("status").asText().equals("processing")) {
+    Thread.sleep(1500);
+    job = client.media().audioOverlays().get(job.path("id").asText());
+}
+
+if (!job.path("status").asText().equals("succeeded")) {
+    throw new IllegalStateException("audio overlay failed");
+}
+
+client.posts().create(Map.of(
+    "caption", "Video with custom audio",
+    "account_ids", List.of("sa_tiktok_xxx"),
+    "media_ids", List.of(job.path("output_media_id").asText())
+));
 ```
 
 ## Get Connect URL (Your Own Accounts)

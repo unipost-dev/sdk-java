@@ -11,7 +11,7 @@ import java.util.Objects;
 public final class UniPost {
     public static final String DEFAULT_BASE_URL = "https://api.unipost.dev";
     public static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(30);
-    public static final String SDK_VERSION = "0.4.0";
+    public static final String SDK_VERSION = "0.5.0";
 
     private final ApiHttpClient http;
 
@@ -375,7 +375,12 @@ public final class UniPost {
     }
 
     public static final class MediaResource extends Resource {
-        MediaResource(ApiHttpClient http) { super(http); }
+        private final AudioOverlaysResource audioOverlays;
+
+        MediaResource(ApiHttpClient http) {
+            super(http);
+            this.audioOverlays = new AudioOverlaysResource(http);
+        }
 
         public JsonNode upload(Map<String, Object> body) {
             return data(http.post("/v1/media", body));
@@ -387,6 +392,27 @@ public final class UniPost {
 
         public void delete(String mediaId) {
             http.delete("/v1/media/" + mediaId);
+        }
+
+        public AudioOverlaysResource audioOverlays() {
+            return audioOverlays;
+        }
+    }
+
+    public static final class AudioOverlaysResource extends Resource {
+        AudioOverlaysResource(ApiHttpClient http) { super(http); }
+
+        public JsonNode create(Map<String, Object> body) {
+            return create(body, null);
+        }
+
+        public JsonNode create(Map<String, Object> body, String idempotencyKey) {
+            Map<String, String> headers = idempotencyKey == null ? Map.of() : Map.of("Idempotency-Key", idempotencyKey);
+            return data(http.post("/v1/media/audio-overlays", body, headers));
+        }
+
+        public JsonNode get(String jobId) {
+            return data(http.get("/v1/media/audio-overlays/" + jobId));
         }
     }
 

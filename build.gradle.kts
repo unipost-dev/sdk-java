@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "dev.unipost"
-version = "0.4.0"
+version = "0.5.0"
 
 java {
     sourceCompatibility = JavaVersion.VERSION_11
