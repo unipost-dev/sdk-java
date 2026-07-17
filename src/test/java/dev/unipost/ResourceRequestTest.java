@@ -9,8 +9,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -231,6 +235,75 @@ class ResourceRequestTest {
         assertEquals("media_output_1", job.path("output_media_id").asText());
         RecordedRequest request = server.takeRequest();
         assertEquals("/v1/media/audio-overlays/mpj_1", request.getPath());
+    }
+
+    @Test
+    void createsGetsAndWaitsForGifConversion() throws Exception {
+        server.enqueue(new MockResponse().setResponseCode(202).addHeader("Content-Type", "application/json")
+                .setBody(gifJob("queued", null, null)));
+        server.enqueue(jsonResponse(gifJob("processing", null, null)));
+        server.enqueue(jsonResponse(gifJob("succeeded", "media_mp4_1", null)));
+
+        GifConversionJob created = client.media().createGifConversion(
+                new GifConversionCreateRequest("media_gif_1", "#ffffff"), "gif-1");
+        GifConversionJob completed = client.media().waitForGifConversion(
+                created.getId(), new GifConversionWaitOptions(Duration.ofMillis(1), Duration.ofSeconds(1)));
+
+        assertEquals("media_mp4_1", completed.getOutputMediaId());
+        RecordedRequest create = server.takeRequest();
+        assertEquals("/v1/media/gif-conversions", create.getPath());
+        assertEquals("gif-1", create.getHeader("Idempotency-Key"));
+        assertTrue(create.getBody().readUtf8().contains("\"gif_media_id\":\"media_gif_1\""));
+    }
+
+    @Test
+    void gifConversionWaitRaisesTypedFailureTimeoutAndSupportsInterruption() {
+        server.enqueue(jsonResponse(gifJob("failed", null,
+                "{\"code\":\"gif_decode_failed\",\"message\":\"bad gif\",\"retryable\":false}")));
+        GifConversionException failure = assertThrows(GifConversionException.class,
+                () -> client.media().waitForGifConversion("mpj_gif_1"));
+        assertEquals("gif_decode_failed", failure.getCode());
+        assertFalse(failure.isRetryable());
+
+        server.enqueue(jsonResponse(gifJob("processing", null, null)));
+        assertThrows(GifConversionTimeoutException.class, () -> client.media().waitForGifConversion(
+                "mpj_gif_1", new GifConversionWaitOptions(Duration.ofSeconds(1), Duration.ofMillis(1))));
+
+        Thread.currentThread().interrupt();
+        assertThrows(CancellationException.class, () -> client.media().waitForGifConversion("mpj_gif_1"));
+        assertTrue(Thread.interrupted());
+    }
+
+    @Test
+    void uploadsAndConvertsGifWithoutPublishing() throws Exception {
+        server.enqueue(jsonResponse("{\"data\":{\"id\":\"media_gif_1\",\"status\":\"reserved\",\"upload_url\":\""
+                + server.url("/upload") + "\"}}"));
+        server.enqueue(new MockResponse().setResponseCode(200));
+        server.enqueue(new MockResponse().setResponseCode(202).addHeader("Content-Type", "application/json")
+                .setBody(gifJob("queued", null, null)));
+        server.enqueue(jsonResponse(gifJob("succeeded", "media_mp4_1", null)));
+        Path file = Files.createTempFile("unipost-animation-", ".gif");
+        Files.write(file, "GIF89a".getBytes());
+        try {
+            GifConversionJob result = client.media().uploadAndConvertGif(file,
+                    new GifUploadAndConvertOptions("#FFFFFF", "upload-gif-1", Duration.ofMillis(1), Duration.ofSeconds(1)));
+            assertEquals("media_mp4_1", result.getOutputMediaId());
+            for (int i = 0; i < 4; i++) {
+                assertNotEquals("/v1/posts", server.takeRequest().getPath());
+            }
+        } finally {
+            Files.deleteIfExists(file);
+        }
+    }
+
+    private static String gifJob(String status, String outputMediaId, String error) {
+        String output = outputMediaId == null ? "null" : "\"" + outputMediaId + "\"";
+        String jobError = error == null ? "null" : error;
+        return "{\"data\":{\"id\":\"mpj_gif_1\",\"kind\":\"gif_to_mp4\",\"status\":\"" + status
+                + "\",\"gif_media_id\":\"media_gif_1\",\"background_color\":\"#FFFFFF\","
+                + "\"output_profile\":\"universal_mp4_v1\",\"output_media_id\":" + output
+                + ",\"created_at\":\"2026-07-17T12:00:00Z\",\"started_at\":null,\"completed_at\":null,"
+                + "\"error\":" + jobError + "}}";
     }
 
     @Test

@@ -3,10 +3,15 @@ package dev.unipost;
 import com.fasterxml.jackson.databind.JsonNode;
 
 import java.net.http.HttpClient;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
+import java.util.concurrent.CancellationException;
 
 public final class UniPost {
     public static final String DEFAULT_BASE_URL = "https://api.unipost.dev";
@@ -376,10 +381,12 @@ public final class UniPost {
 
     public static final class MediaResource extends Resource {
         private final AudioOverlaysResource audioOverlays;
+        private final GifConversionsResource gifConversions;
 
         MediaResource(ApiHttpClient http) {
             super(http);
             this.audioOverlays = new AudioOverlaysResource(http);
+            this.gifConversions = new GifConversionsResource(http, this);
         }
 
         public JsonNode upload(Map<String, Object> body) {
@@ -397,6 +404,56 @@ public final class UniPost {
         public AudioOverlaysResource audioOverlays() {
             return audioOverlays;
         }
+
+        public GifConversionsResource gifConversions() { return gifConversions; }
+
+        public GifConversionJob createGifConversion(GifConversionCreateRequest request) {
+            return gifConversions.create(request);
+        }
+
+        public GifConversionJob createGifConversion(GifConversionCreateRequest request, String idempotencyKey) {
+            return gifConversions.create(request, idempotencyKey);
+        }
+
+        public GifConversionJob getGifConversion(String conversionId) {
+            return gifConversions.get(conversionId);
+        }
+
+        public GifConversionJob waitForGifConversion(String conversionId) {
+            return gifConversions.waitFor(conversionId);
+        }
+
+        public GifConversionJob waitForGifConversion(String conversionId, GifConversionWaitOptions options) {
+            return gifConversions.waitFor(conversionId, options);
+        }
+
+        public String uploadFile(Path file) {
+            Objects.requireNonNull(file, "file");
+            try {
+                String filename = file.getFileName().toString();
+                String contentType = filename.toLowerCase().endsWith(".gif")
+                        ? "image/gif" : Files.probeContentType(file);
+                if (contentType == null) contentType = "application/octet-stream";
+                JsonNode reserved = upload(Map.of(
+                        "filename", filename,
+                        "content_type", contentType,
+                        "size_bytes", Files.size(file)
+                ));
+                String mediaId = reserved.path("media_id").asText(reserved.path("id").asText());
+                String uploadUrl = reserved.path("upload_url").asText();
+                if (mediaId.isBlank() || uploadUrl.isBlank()) {
+                    throw new IllegalStateException("Media upload response is missing media ID or upload URL");
+                }
+                http.putBytes(uploadUrl, Files.readAllBytes(file), contentType);
+                return mediaId;
+            } catch (IOException e) {
+                throw new IllegalStateException("Failed to read media file", e);
+            }
+        }
+
+        public GifConversionJob uploadAndConvertGif(Path file, GifUploadAndConvertOptions options) {
+            return gifConversions.uploadAndConvert(file, options);
+        }
     }
 
     public static final class AudioOverlaysResource extends Resource {
@@ -413,6 +470,83 @@ public final class UniPost {
 
         public JsonNode get(String jobId) {
             return data(http.get("/v1/media/audio-overlays/" + jobId));
+        }
+    }
+
+    public static final class GifConversionsResource extends Resource {
+        private final MediaResource media;
+
+        GifConversionsResource(ApiHttpClient http, MediaResource media) {
+            super(http);
+            this.media = media;
+        }
+
+        public GifConversionJob create(GifConversionCreateRequest request) {
+            return create(request, null);
+        }
+
+        public GifConversionJob create(GifConversionCreateRequest request, String idempotencyKey) {
+            Objects.requireNonNull(request, "request");
+            Map<String, String> headers = idempotencyKey == null
+                    ? Map.of() : Map.of("Idempotency-Key", idempotencyKey);
+            return GifConversionJob.fromJson(data(http.post(
+                    "/v1/media/gif-conversions", request.toBody(), headers)));
+        }
+
+        public GifConversionJob get(String conversionId) {
+            return GifConversionJob.fromJson(data(http.get(
+                    "/v1/media/gif-conversions/" + Objects.requireNonNull(conversionId, "conversionId"))));
+        }
+
+        public GifConversionJob waitFor(String conversionId) {
+            return waitFor(conversionId, GifConversionWaitOptions.DEFAULTS);
+        }
+
+        public GifConversionJob waitFor(String conversionId, GifConversionWaitOptions options) {
+            Objects.requireNonNull(options, "options");
+            long deadline = System.nanoTime() + options.getTimeout().toNanos();
+            while (true) {
+                if (Thread.currentThread().isInterrupted()) {
+                    throw new CancellationException("GIF conversion polling was interrupted");
+                }
+                GifConversionJob job = get(conversionId);
+                if ("succeeded".equals(job.getStatus())) return job;
+                if ("failed".equals(job.getStatus())) {
+                    GifConversionJobError error = job.getError();
+                    if (error == null) {
+                        throw new GifConversionException(
+                                "gif_conversion_failed", "GIF conversion failed", false);
+                    }
+                    throw new GifConversionException(error.getCode(), error.getMessage(), error.isRetryable());
+                }
+                if (System.nanoTime() >= deadline) {
+                    throw new GifConversionTimeoutException(conversionId);
+                }
+                long remaining = deadline - System.nanoTime();
+                long sleepMillis = Math.max(1, Math.min(
+                        options.getPollInterval().toMillis(), Duration.ofNanos(remaining).toMillis()));
+                try {
+                    Thread.sleep(sleepMillis);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new CancellationException("GIF conversion polling was interrupted");
+                }
+            }
+        }
+
+        public GifConversionJob uploadAndConvert(Path file, GifUploadAndConvertOptions options) {
+            if (options == null) {
+                options = new GifUploadAndConvertOptions(null, null, null, null);
+            }
+            String mediaId = media.uploadFile(file);
+            String idempotencyKey = options.getIdempotencyKey() == null
+                    ? UUID.randomUUID().toString() : options.getIdempotencyKey();
+            GifConversionJob created = create(
+                    new GifConversionCreateRequest(mediaId, options.getBackgroundColor()), idempotencyKey);
+            GifConversionWaitOptions waitOptions = new GifConversionWaitOptions(
+                    options.getPollInterval() == null ? Duration.ofSeconds(2) : options.getPollInterval(),
+                    options.getTimeout() == null ? Duration.ofMinutes(5) : options.getTimeout());
+            return waitFor(created.getId(), waitOptions);
         }
     }
 

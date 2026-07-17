@@ -115,6 +115,25 @@ final class ApiHttpClient {
         return send("DELETE", path, Collections.emptyMap(), null, Collections.emptyMap());
     }
 
+    void putBytes(String absoluteUrl, byte[] body, String contentType) {
+        try {
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(absoluteUrl))
+                    .header("Content-Type", contentType)
+                    .PUT(HttpRequest.BodyPublishers.ofByteArray(body))
+                    .build();
+            HttpResponse<Void> response = httpClient.send(request, HttpResponse.BodyHandlers.discarding());
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                throw new IllegalStateException("Media upload failed with status " + response.statusCode());
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException("Media upload failed", e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new java.util.concurrent.CancellationException("Media upload was interrupted");
+        }
+    }
+
     JsonNode send(String method, String path, Map<String, ?> query, Object body, Map<String, String> extraHeaders) {
         try {
             HttpRequest.Builder builder = HttpRequest.newBuilder()
