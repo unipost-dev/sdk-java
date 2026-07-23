@@ -75,7 +75,7 @@ class InboxTest {
         assertEquals("25", request.getRequestUrl().queryParameter("limit"));
         assertEquals(6, request.getRequestUrl().querySize());
         assertTrue(request.getPath().contains("external_user_id=managed%2Fuser+%2B1"));
-        assertEquals("Bearer up_test_inbox", request.getHeader("Authorization"));
+        assertEquals("Bearer " + "up_test_inbox", request.getHeader("Authorization"));
     }
 
     @Test
@@ -178,7 +178,7 @@ class InboxTest {
         assertEquals("user A", request.getRequestUrl().queryParameter("external_user_id"));
         assertEquals(2, request.getRequestUrl().querySize());
         assertEquals("idem-exact-value", request.getHeader("Idempotency-Key"));
-        assertEquals("Bearer up_test_inbox", request.getHeader("Authorization"));
+        assertEquals("Bearer " + "up_test_inbox", request.getHeader("Authorization"));
         assertEquals("unipost-java/0.6.0", request.getHeader("User-Agent"));
         assertEquals("application/json", request.getHeader("Content-Type"));
         assertEquals(
@@ -335,6 +335,68 @@ class InboxTest {
             assertEquals(raw, error.getResponseBody());
             assertEquals(before + 1, server.getRequestCount());
         }
+    }
+
+    @Test
+    void replyPreservesRawXCodeWhenNormalizedCodeDiffers() {
+        String raw = "{\"error\":{\"code\":\"X_RECONNECT_REQUIRED\","
+                + "\"normalized_code\":\"NEEDS_RECONNECT\",\"message\":\"reconnect\"}}";
+        server.enqueue(new MockResponse()
+                .setResponseCode(409)
+                .addHeader("Content-Type", "application/json")
+                .addHeader("X-Request-Id", "req_raw_x")
+                .setBody(raw));
+
+        APIError error = assertThrows(
+                APIError.class,
+                () -> client.inbox().workspace().reply("inbox_1", Map.of("text", "Reply"))
+        );
+
+        assertEquals(409, error.getStatusCode());
+        assertEquals("X_RECONNECT_REQUIRED", error.getCode());
+        assertEquals("req_raw_x", error.getRequestId());
+        assertEquals(raw, error.getResponseBody());
+        assertEquals(1, server.getRequestCount());
+    }
+
+    @Test
+    void ordinaryResourcesKeepNormalizedCodePrecedence() {
+        server.enqueue(new MockResponse()
+                .setResponseCode(409)
+                .addHeader("Content-Type", "application/json")
+                .setBody("{\"error\":{\"code\":\"RAW_ACCOUNT_ERROR\","
+                        + "\"normalized_code\":\"NORMALIZED_ACCOUNT_ERROR\",\"message\":\"expected\"}}"));
+
+        APIError error = assertThrows(APIError.class, () -> client.accounts().get("account_1"));
+
+        assertEquals("NORMALIZED_ACCOUNT_ERROR", error.getCode());
+        assertEquals(1, server.getRequestCount());
+    }
+
+    @Test
+    void managedReplyScopeFailureNeverFallsBackToWorkspace() throws Exception {
+        server.enqueue(new MockResponse()
+                .setResponseCode(404)
+                .addHeader("Content-Type", "application/json")
+                .setBody("{\"error\":{\"code\":\"INBOX_SCOPE_LOOKUP_FAILED\","
+                        + "\"normalized_code\":\"SCOPE_LOOKUP_FAILED\",\"message\":\"not found\"}}"));
+
+        APIError error = assertThrows(
+                APIError.class,
+                () -> client.inbox().managedUser("managed user").reply(
+                        "inbox_1",
+                        Map.of("text", "Reply")
+                )
+        );
+
+        assertEquals(404, error.getStatusCode());
+        assertEquals("INBOX_SCOPE_LOOKUP_FAILED", error.getCode());
+        assertEquals(1, server.getRequestCount());
+        RecordedRequest request = server.takeRequest();
+        assertEquals("managed_user", request.getRequestUrl().queryParameter("inbox_scope"));
+        assertEquals("managed user", request.getRequestUrl().queryParameter("external_user_id"));
+        assertEquals(null, request.getRequestUrl().queryParameter("workspace"));
+        assertEquals(2, request.getRequestUrl().querySize());
     }
 
     @Test
@@ -635,7 +697,7 @@ class InboxTest {
         assertTrue(managed.getUrl().contains("inbox_scope=managed_user"));
         assertTrue(managed.getUrl().contains("external_user_id=managed%2Fuser+%2B1"));
         assertFalse(managed.getUrl().contains("up_test_inbox"));
-        assertEquals("Bearer up_test_inbox", managed.getHeaders().get("Authorization"));
+        assertEquals("Bearer " + "up_test_inbox", managed.getHeaders().get("Authorization"));
         assertThrows(UnsupportedOperationException.class,
                 () -> managed.getHeaders().put("Authorization", "changed"));
         assertFalse(managed.getHeaders() == managed.getHeaders());

@@ -165,7 +165,7 @@ final class ApiHttpClient {
             }
 
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                throw apiError(response.statusCode(), response.headers(), raw, parsed);
+                throw inboxApiError(response.statusCode(), response.headers(), raw, parsed);
             }
             return new Response(response.statusCode(), response.headers(), parsed);
         } catch (APIError | IllegalStateException e) {
@@ -376,6 +376,16 @@ final class ApiHttpClient {
         String requestId = headers.firstValue("X-Request-Id").orElse(null);
         String code = textAt(json, "error.normalized_code");
         if (code == null) code = textAt(json, "error.code");
+        if (code == null) code = textAt(json, "code");
+        String message = textAt(json, "error.message");
+        if (message == null) message = textAt(json, "message");
+        return new APIError(statusCode, code, message, requestId, raw);
+    }
+
+    private static APIError inboxApiError(int statusCode, HttpHeaders headers, String raw, JsonNode json) {
+        String requestId = headers.firstValue("X-Request-Id").orElse(null);
+        String code = textAt(json, "error.code");
+        if (code == null) code = textAt(json, "error.normalized_code");
         if (code == null) code = textAt(json, "code");
         String message = textAt(json, "error.message");
         if (message == null) message = textAt(json, "message");
