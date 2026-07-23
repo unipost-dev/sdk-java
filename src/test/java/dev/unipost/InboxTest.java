@@ -478,6 +478,184 @@ class InboxTest {
         assertEquals(1, server.getRequestCount());
     }
 
+    @Test
+    void remainingManagedUserEndpointsUseExactRoutesScopesBodiesAndDataEnvelopes() throws Exception {
+        server.enqueue(jsonResponse("{\"data\":{\"count\":4}}"));
+        server.enqueue(jsonResponse("{\"data\":{\"id\":\"inbox_1\"}}"));
+        server.enqueue(new MockResponse().setResponseCode(204));
+        server.enqueue(jsonResponse("{\"data\":{\"marked\":3}}"));
+        server.enqueue(jsonResponse("{\"data\":{\"id\":\"inbox_1\",\"thread_status\":\"assigned\"}}"));
+        server.enqueue(jsonResponse("{\"data\":{\"id\":\"media_1\",\"media_type\":\"IMAGE\"}}"));
+        server.enqueue(jsonResponse("{\"data\":{\"new_items\":2,\"accounts_checked\":1}}"));
+        server.enqueue(jsonResponse("{\"data\":{\"confirmation_required\":false,\"accepted\":2}}"));
+        server.enqueue(jsonResponse("{\"data\":{\"id\":\"out_1\",\"status\":\"completed\"}}"));
+
+        Inbox.Scoped inbox = client.inbox().managedUser("managed user");
+        assertEquals(4, inbox.unreadCount().path("count").asInt());
+        assertEquals("inbox_1", inbox.get("item /?#").path("id").asText());
+        inbox.markRead("item /?#");
+        assertEquals(3, inbox.markAllRead().path("marked").asInt());
+
+        Map<String, Object> threadState = new LinkedHashMap<>();
+        threadState.put("thread_status", "assigned");
+        threadState.put("assigned_to", "agent_7");
+        threadState.put("unexpected", "must-not-be-sent");
+        assertEquals("assigned", inbox.updateThreadState("item /?#", threadState)
+                .path("thread_status").asText());
+        threadState.put("thread_status", "resolved");
+
+        assertEquals("media_1", inbox.mediaContext("item /?#").path("id").asText());
+        assertEquals(2, inbox.sync().path("new_items").asInt());
+
+        Map<String, Object> backfill = new LinkedHashMap<>();
+        backfill.put("account_id", "acct_x");
+        backfill.put("lookback_days", 7);
+        backfill.put("max_items", 50);
+        backfill.put("include_replies", false);
+        backfill.put("include_dms", false);
+        backfill.put("confirmation_token", "confirmation-exact-value");
+        assertFalse(inbox.syncXBackfill(backfill).path("confirmation_required").asBoolean());
+        backfill.put("confirmation_token", "mutated");
+
+        assertEquals("out_1", inbox.xOutboundStatus("request /?#").path("id").asText());
+
+        assertRequest("GET", "/v1/inbox/unread-count", null);
+        assertRequest("GET", "/v1/inbox/item%20%2F%3F%23", null);
+        assertRequest("POST", "/v1/inbox/item%20%2F%3F%23/read", "");
+        assertRequest("POST", "/v1/inbox/mark-all-read", "");
+        assertRequest("POST", "/v1/inbox/item%20%2F%3F%23/thread-state",
+                "{\"thread_status\":\"assigned\",\"assigned_to\":\"agent_7\"}");
+        assertRequest("GET", "/v1/inbox/item%20%2F%3F%23/media-context", null);
+        assertRequest("POST", "/v1/inbox/sync", "");
+        assertRequest("POST", "/v1/inbox/sync",
+                "{\"x_backfill\":{\"account_id\":\"acct_x\",\"lookback_days\":7,\"max_items\":50,"
+                        + "\"include_replies\":false,\"include_dms\":false,"
+                        + "\"confirmation_token\":\"confirmation-exact-value\"}}");
+        assertRequest("GET", "/v1/inbox/x-outbound-operations/request%20%2F%3F%23", null);
+        assertEquals(9, server.getRequestCount());
+    }
+
+    @Test
+    void workspaceRemainingEndpointOmitsManagedUserIdentifier() throws Exception {
+        server.enqueue(jsonResponse("{\"data\":{\"count\":1}}"));
+
+        assertEquals(1, client.inbox().workspace().unreadCount().path("count").asInt());
+
+        HttpUrl url = server.takeRequest().getRequestUrl();
+        assertEquals("workspace", url.queryParameter("inbox_scope"));
+        assertNull(url.queryParameter("external_user_id"));
+        assertEquals(1, url.querySize());
+    }
+
+    @Test
+    void remainingEndpointsRejectUnsafeIdsThreadStatesAndBackfillsBeforeNetwork() {
+        Inbox.Scoped inbox = client.inbox().workspace();
+        for (String id : List.of("", "   ", "\u2003", ".", "..", " .. ", "\u2003..\u2003")) {
+            assertThrows(IllegalArgumentException.class, () -> inbox.get(id));
+            assertThrows(IllegalArgumentException.class, () -> inbox.markRead(id));
+            assertThrows(IllegalArgumentException.class,
+                    () -> inbox.updateThreadState(id, Map.of("thread_status", "open")));
+            assertThrows(IllegalArgumentException.class, () -> inbox.mediaContext(id));
+            assertThrows(IllegalArgumentException.class, () -> inbox.xOutboundStatus(id));
+        }
+
+        for (Object status : List.of("", "pending", 7, true)) {
+            assertThrows(IllegalArgumentException.class,
+                    () -> inbox.updateThreadState("inbox_1", Map.of("thread_status", status)));
+        }
+        assertThrows(IllegalArgumentException.class,
+                () -> inbox.updateThreadState("inbox_1", null));
+        assertThrows(IllegalArgumentException.class,
+                () -> inbox.updateThreadState("inbox_1", Map.of("thread_status", "open", "inbox_scope", "workspace")));
+        assertThrows(IllegalArgumentException.class,
+                () -> inbox.updateThreadState("inbox_1", Map.of("thread_status", "open", "external_user_id", "user_2")));
+
+        assertThrows(IllegalArgumentException.class, () -> inbox.syncXBackfill(null));
+        assertThrows(IllegalArgumentException.class,
+                () -> inbox.syncXBackfill(Map.of("include_replies", true)));
+        assertThrows(IllegalArgumentException.class,
+                () -> inbox.syncXBackfill(Map.of("include_replies", true, "include_dms", "false")));
+        assertThrows(IllegalArgumentException.class,
+                () -> inbox.syncXBackfill(Map.of(
+                        "include_replies", true,
+                        "include_dms", false,
+                        "inbox_scope", "workspace"
+                )));
+        assertThrows(IllegalArgumentException.class,
+                () -> inbox.syncXBackfill(Map.of(
+                        "include_replies", true,
+                        "include_dms", false,
+                        "unknown", 1
+                )));
+        assertEquals(0, server.getRequestCount());
+    }
+
+    @Test
+    void allRemainingInboxWritesAreSingleAttemptAndDoNotFollowRedirects() throws Exception {
+        try (MockWebServer target = new MockWebServer()) {
+            target.start();
+            target.enqueue(jsonResponse("{\"data\":{\"marked\":999}}"));
+            server.enqueue(new MockResponse()
+                    .setResponseCode(307)
+                    .addHeader("Location", target.url("/redirect-target"))
+                    .setBody("{\"error\":{\"code\":\"TEMPORARY_REDIRECT\",\"message\":\"redirect\"}}"));
+
+            APIError error = assertThrows(APIError.class,
+                    () -> client.inbox().workspace().markAllRead());
+
+            assertEquals(307, error.getStatusCode());
+            assertEquals(1, server.getRequestCount());
+            assertEquals(0, target.getRequestCount());
+        }
+    }
+
+    @Test
+    void webSocketConnectionDetailsAreScopedLocalAndDefensive() {
+        Inbox.WebSocketConnectionDetails managed = client.inbox()
+                .managedUser("managed/user +1")
+                .webSocketConnectionDetails();
+
+        assertEquals("ws", java.net.URI.create(managed.getUrl()).getScheme());
+        assertEquals("/v1/inbox/ws", java.net.URI.create(managed.getUrl()).getPath());
+        assertTrue(managed.getUrl().contains("inbox_scope=managed_user"));
+        assertTrue(managed.getUrl().contains("external_user_id=managed%2Fuser+%2B1"));
+        assertFalse(managed.getUrl().contains("up_test_inbox"));
+        assertEquals("Bearer up_test_inbox", managed.getHeaders().get("Authorization"));
+        assertThrows(UnsupportedOperationException.class,
+                () -> managed.getHeaders().put("Authorization", "changed"));
+        assertFalse(managed.getHeaders() == managed.getHeaders());
+
+        Inbox.WebSocketConnectionDetails workspace = client.inbox().workspace()
+                .webSocketConnectionDetails();
+        assertTrue(workspace.getUrl().contains("inbox_scope=workspace"));
+        assertFalse(workspace.getUrl().contains("external_user_id"));
+        assertFalse(managed.getHeaders() == workspace.getHeaders());
+        assertEquals(0, server.getRequestCount());
+
+        UniPost secureClient = UniPost.builder()
+                .apiKey("up_test_secure")
+                .baseUrl("https://api.example.test/base-path")
+                .build();
+        Inbox.WebSocketConnectionDetails secure = secureClient.inbox().workspace()
+                .webSocketConnectionDetails();
+        assertEquals("wss://api.example.test/v1/inbox/ws?inbox_scope=workspace", secure.getUrl());
+        assertFalse(secure.getUrl().contains("up_test_secure"));
+    }
+
+    private void assertRequest(String method, String encodedPath, String expectedBody) throws Exception {
+        RecordedRequest request = server.takeRequest();
+        assertEquals(method, request.getMethod());
+        assertEquals(encodedPath, request.getRequestUrl().encodedPath());
+        assertEquals("managed_user", request.getRequestUrl().queryParameter("inbox_scope"));
+        assertEquals("managed user", request.getRequestUrl().queryParameter("external_user_id"));
+        assertEquals(2, request.getRequestUrl().querySize());
+        if (expectedBody == null) {
+            assertEquals(0, request.getBodySize());
+        } else {
+            assertEquals(expectedBody, request.getBody().readUtf8());
+        }
+    }
+
     private static MockResponse jsonResponse(String body) {
         return new MockResponse()
                 .setResponseCode(200)

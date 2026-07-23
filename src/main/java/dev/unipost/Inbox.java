@@ -89,6 +89,26 @@ public final class Inbox extends UniPost.Resource {
         }
     }
 
+    /** Server-side WebSocket handshake details for the selected Inbox scope. */
+    public static final class WebSocketConnectionDetails {
+        private final String url;
+        private final Map<String, String> headers;
+
+        WebSocketConnectionDetails(String url, Map<String, String> headers) {
+            this.url = url;
+            this.headers = Collections.unmodifiableMap(new LinkedHashMap<>(headers));
+        }
+
+        public String getUrl() {
+            return url;
+        }
+
+        /** Returns a fresh immutable copy so caller state cannot persist. */
+        public Map<String, String> getHeaders() {
+            return Collections.unmodifiableMap(new LinkedHashMap<>(headers));
+        }
+    }
+
     /** Access Inbox data belonging to one managed user. */
     public Scoped managedUser(String externalUserId) {
         if (externalUserId == null || externalUserId.isBlank()) {
@@ -128,7 +148,64 @@ public final class Inbox extends UniPost.Resource {
                     : new LinkedHashMap<>(params);
             validateFilters(query);
             query.putAll(scope);
-            return dataList(http.get("/v1/inbox", query));
+            return dataList(http.getInbox("/v1/inbox", query));
+        }
+
+        public JsonNode unreadCount() {
+            return data(http.getInbox("/v1/inbox/unread-count", scope));
+        }
+
+        public JsonNode get(String itemId) {
+            return data(http.getInbox("/v1/inbox/" + encodePathId(itemId), scope));
+        }
+
+        /** Marks one item read with a single no-body request. */
+        public void markRead(String itemId) {
+            postOnce("/v1/inbox/" + encodePathId(itemId) + "/read", null);
+        }
+
+        /** Marks every item in the selected scope read with a single no-body request. */
+        public JsonNode markAllRead() {
+            return data(postOnce("/v1/inbox/mark-all-read", null));
+        }
+
+        public JsonNode updateThreadState(String itemId, Map<String, ?> body) {
+            return data(postOnce(
+                    "/v1/inbox/" + encodePathId(itemId) + "/thread-state",
+                    canonicalThreadStateBody(body)
+            ));
+        }
+
+        public JsonNode mediaContext(String itemId) {
+            return data(http.getInbox(
+                    "/v1/inbox/" + encodePathId(itemId) + "/media-context",
+                    scope
+            ));
+        }
+
+        /** Performs an ordinary selected-scope sync with no request body. */
+        public JsonNode sync() {
+            return data(postOnce("/v1/inbox/sync", null));
+        }
+
+        /** Performs a metered X backfill, including an optional confirmation token. */
+        public JsonNode syncXBackfill(Map<String, ?> request) {
+            return data(postOnce(
+                    "/v1/inbox/sync",
+                    Map.of("x_backfill", canonicalXBackfill(request))
+            ));
+        }
+
+        public JsonNode xOutboundStatus(String requestId) {
+            return data(http.getInbox(
+                    "/v1/inbox/x-outbound-operations/" + encodePathId(requestId),
+                    scope
+            ));
+        }
+
+        /** Builds scoped server-side WebSocket details without making a request. */
+        public WebSocketConnectionDetails webSocketConnectionDetails() {
+            return http.inboxWebSocketConnectionDetails(scope);
         }
 
         /** Sends one reply without retrying or following redirects. */
@@ -166,6 +243,10 @@ public final class Inbox extends UniPost.Resource {
             }
         }
 
+        private JsonNode postOnce(String path, Object body) {
+            return http.postWithResponse(path, scope, body, Collections.emptyMap()).getBody();
+        }
+
         private static Map<String, Object> immutableCopy(Map<String, ?> source) {
             return Collections.unmodifiableMap(new LinkedHashMap<>(source));
         }
@@ -175,6 +256,96 @@ public final class Inbox extends UniPost.Resource {
                 throw new IllegalArgumentException("Inbox reply text must be a string.");
             }
             return Map.of("text", body.get("text"));
+        }
+
+        private static Map<String, Object> canonicalThreadStateBody(Map<String, ?> body) {
+            if (body == null) {
+                throw new IllegalArgumentException("Inbox thread state request is required.");
+            }
+            rejectReservedKeys(body);
+            Object rawStatus = body.get("thread_status");
+            if (!(rawStatus instanceof String)
+                    || !("open".equals(rawStatus)
+                    || "assigned".equals(rawStatus)
+                    || "resolved".equals(rawStatus))) {
+                throw new IllegalArgumentException("Invalid Inbox thread status.");
+            }
+            Map<String, Object> canonical = new LinkedHashMap<>();
+            canonical.put("thread_status", rawStatus);
+            if (body.containsKey("assigned_to") && body.get("assigned_to") != null) {
+                if (!(body.get("assigned_to") instanceof String)) {
+                    throw new IllegalArgumentException("Inbox assigned_to must be a string.");
+                }
+                canonical.put("assigned_to", body.get("assigned_to"));
+            }
+            return canonical;
+        }
+
+        private static Map<String, Object> canonicalXBackfill(Map<String, ?> request) {
+            if (request == null) {
+                throw new IllegalArgumentException("X Inbox backfill request is required.");
+            }
+            rejectReservedKeys(request);
+            Set<String> allowed = Set.of(
+                    "account_id",
+                    "lookback_days",
+                    "max_items",
+                    "include_replies",
+                    "include_dms",
+                    "confirmation_token"
+            );
+            for (String key : request.keySet()) {
+                if (!allowed.contains(key)) {
+                    throw new IllegalArgumentException("Unknown X Inbox backfill field.");
+                }
+            }
+            if (!(request.get("include_replies") instanceof Boolean)
+                    || !(request.get("include_dms") instanceof Boolean)) {
+                throw new IllegalArgumentException("X Inbox backfill boolean selections are required.");
+            }
+            validateOptionalType(request, "account_id", String.class);
+            validateOptionalType(request, "lookback_days", Number.class);
+            validateOptionalType(request, "max_items", Number.class);
+            validateOptionalType(request, "confirmation_token", String.class);
+
+            Map<String, Object> canonical = new LinkedHashMap<>();
+            copyIfPresent(request, canonical, "account_id");
+            copyIfPresent(request, canonical, "lookback_days");
+            copyIfPresent(request, canonical, "max_items");
+            canonical.put("include_replies", request.get("include_replies"));
+            canonical.put("include_dms", request.get("include_dms"));
+            copyIfPresent(request, canonical, "confirmation_token");
+            return canonical;
+        }
+
+        private static void rejectReservedKeys(Map<String, ?> values) {
+            for (String key : RESERVED_KEYS) {
+                if (values.containsKey(key)) {
+                    throw new IllegalArgumentException("Inbox scope cannot be provided in a request body.");
+                }
+            }
+        }
+
+        private static void validateOptionalType(
+                Map<String, ?> values,
+                String key,
+                Class<?> expectedType
+        ) {
+            if (values.containsKey(key)
+                    && values.get(key) != null
+                    && !expectedType.isInstance(values.get(key))) {
+                throw new IllegalArgumentException("Invalid X Inbox backfill field.");
+            }
+        }
+
+        private static void copyIfPresent(
+                Map<String, ?> source,
+                Map<String, Object> target,
+                String key
+        ) {
+            if (source.containsKey(key) && source.get(key) != null) {
+                target.put(key, source.get(key));
+            }
         }
 
         private static ReplyResult decodeReply(ApiHttpClient.Response response) {

@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpHeaders;
@@ -50,6 +51,11 @@ final class ApiHttpClient {
 
     JsonNode get(String path, Map<String, ?> query) {
         return send("GET", path, query, null, Collections.emptyMap());
+    }
+
+    JsonNode getInbox(String path, Map<String, ?> query) {
+        validateInboxApiKey();
+        return get(path, query);
     }
 
     String getText(String path, Map<String, ?> query) {
@@ -120,21 +126,25 @@ final class ApiHttpClient {
         }
         validateInboxApiKey();
 
-        final String json;
-        try {
-            json = MAPPER.writeValueAsString(body);
-        } catch (JsonProcessingException e) {
-            throw new IllegalStateException("Failed to encode UniPost request.");
-        }
-
         try {
             HttpRequest.Builder builder = HttpRequest.newBuilder()
                     .uri(URI.create(baseUrl + path + buildQuery(query)))
                     .header("Authorization", "Bearer " + apiKey)
                     .header("Accept", "application/json")
-                    .header("User-Agent", userAgent)
-                    .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8));
+                    .header("User-Agent", userAgent);
+
+            if (body == null) {
+                builder.POST(HttpRequest.BodyPublishers.noBody());
+            } else {
+                final String json;
+                try {
+                    json = MAPPER.writeValueAsString(body);
+                } catch (JsonProcessingException e) {
+                    throw new IllegalStateException("Failed to encode UniPost request.");
+                }
+                builder.header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8));
+            }
 
             for (Map.Entry<String, String> entry : extraHeaders.entrySet()) {
                 if (entry.getValue() != null) {
@@ -165,6 +175,43 @@ final class ApiHttpClient {
                 Thread.currentThread().interrupt();
             }
             throw new IllegalStateException("UniPost request failed", e);
+        }
+    }
+
+    Inbox.WebSocketConnectionDetails inboxWebSocketConnectionDetails(Map<String, ?> scope) {
+        validateInboxApiKey();
+        try {
+            URI base = new URI(baseUrl);
+            String scheme;
+            if ("https".equalsIgnoreCase(base.getScheme())) {
+                scheme = "wss";
+            } else if ("http".equalsIgnoreCase(base.getScheme())) {
+                scheme = "ws";
+            } else {
+                throw new IllegalArgumentException();
+            }
+            if (base.getHost() == null
+                    || base.getHost().isBlank()
+                    || base.getRawUserInfo() != null
+                    || base.getRawQuery() != null
+                    || base.getRawFragment() != null) {
+                throw new IllegalArgumentException();
+            }
+            URI connection = new URI(
+                    scheme,
+                    null,
+                    base.getHost(),
+                    base.getPort(),
+                    "/v1/inbox/ws",
+                    null,
+                    null
+            );
+            return new Inbox.WebSocketConnectionDetails(
+                    connection.toASCIIString() + buildQuery(scope),
+                    Map.of("Authorization", "Bearer " + apiKey)
+            );
+        } catch (URISyntaxException | IllegalArgumentException e) {
+            throw new IllegalStateException("UniPost Inbox WebSocket base URL is invalid.");
         }
     }
 
