@@ -121,6 +121,25 @@ final class ApiHttpClient {
             Object body,
             Map<String, String> extraHeaders
     ) {
+        return sendWithResponse(path, query, body, extraHeaders, false);
+    }
+
+    Response postWithResponsePreservingRawErrorCode(
+            String path,
+            Map<String, ?> query,
+            Object body,
+            Map<String, String> extraHeaders
+    ) {
+        return sendWithResponse(path, query, body, extraHeaders, true);
+    }
+
+    private Response sendWithResponse(
+            String path,
+            Map<String, ?> query,
+            Object body,
+            Map<String, String> extraHeaders,
+            boolean preserveRawErrorCode
+    ) {
         if (httpClient.followRedirects() != HttpClient.Redirect.NEVER) {
             throw new IllegalStateException("UniPost Inbox writes require redirects to be disabled.");
         }
@@ -165,7 +184,9 @@ final class ApiHttpClient {
             }
 
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                throw inboxApiError(response.statusCode(), response.headers(), raw, parsed);
+                throw preserveRawErrorCode
+                        ? inboxApiError(response.statusCode(), response.headers(), raw, parsed)
+                        : apiError(response.statusCode(), response.headers(), raw, parsed);
             }
             return new Response(response.statusCode(), response.headers(), parsed);
         } catch (APIError | IllegalStateException e) {

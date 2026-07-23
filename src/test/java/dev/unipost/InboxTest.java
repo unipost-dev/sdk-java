@@ -374,6 +374,32 @@ class InboxTest {
     }
 
     @Test
+    void ordinaryInboxWritesKeepNormalizedCodePrecedence() throws Exception {
+        String raw = "{\"error\":{\"code\":\"RAW_MARK_READ_ERROR\","
+                + "\"normalized_code\":\"NORMALIZED_MARK_READ_ERROR\",\"message\":\"expected\"}}";
+        server.enqueue(new MockResponse()
+                .setResponseCode(409)
+                .addHeader("Content-Type", "application/json")
+                .addHeader("X-Request-Id", "req_mark_read")
+                .setBody(raw));
+
+        APIError error = assertThrows(
+                APIError.class,
+                () -> client.inbox().managedUser("managed user").markRead("inbox_1")
+        );
+
+        assertEquals(409, error.getStatusCode());
+        assertEquals("NORMALIZED_MARK_READ_ERROR", error.getCode());
+        assertEquals("req_mark_read", error.getRequestId());
+        assertEquals(raw, error.getResponseBody());
+        assertEquals(1, server.getRequestCount());
+        RecordedRequest request = server.takeRequest();
+        assertEquals("/v1/inbox/inbox_1/read", request.getRequestUrl().encodedPath());
+        assertEquals("managed_user", request.getRequestUrl().queryParameter("inbox_scope"));
+        assertEquals("managed user", request.getRequestUrl().queryParameter("external_user_id"));
+    }
+
+    @Test
     void managedReplyScopeFailureNeverFallsBackToWorkspace() throws Exception {
         server.enqueue(new MockResponse()
                 .setResponseCode(404)

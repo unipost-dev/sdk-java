@@ -223,7 +223,7 @@ public final class Inbox extends UniPost.Resource {
                 headers = Map.of("Idempotency-Key", idempotencyKey);
             }
 
-            ApiHttpClient.Response response = http.postWithResponse(
+            ApiHttpClient.Response response = http.postWithResponsePreservingRawErrorCode(
                     "/v1/inbox/" + encodedItemId + "/reply",
                     scope,
                     canonicalBody,
