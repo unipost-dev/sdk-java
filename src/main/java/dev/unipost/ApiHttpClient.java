@@ -118,6 +118,7 @@ final class ApiHttpClient {
         if (httpClient.followRedirects() != HttpClient.Redirect.NEVER) {
             throw new IllegalStateException("UniPost Inbox writes require redirects to be disabled.");
         }
+        validateInboxApiKey();
 
         final String json;
         try {
@@ -332,6 +333,15 @@ final class ApiHttpClient {
         String message = textAt(json, "error.message");
         if (message == null) message = textAt(json, "message");
         return new APIError(statusCode, code, message, requestId, raw);
+    }
+
+    private void validateInboxApiKey() {
+        for (int index = 0; index < apiKey.length(); index++) {
+            char value = apiKey.charAt(index);
+            if (value < 32 || (value >= 127 && value <= 159) || value > 255) {
+                throw new IllegalStateException("UniPost Inbox request credentials are invalid.");
+            }
+        }
     }
 
     private static String textAt(JsonNode root, String dottedPath) {

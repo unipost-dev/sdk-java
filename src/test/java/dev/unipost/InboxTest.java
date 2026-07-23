@@ -21,6 +21,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -369,6 +370,35 @@ class InboxTest {
             );
             assertEquals("Invalid Inbox reply idempotency key.", error.getMessage());
             assertFalse(error.toString().contains(unsafeKey));
+        }
+        assertEquals(0, server.getRequestCount());
+    }
+
+    @Test
+    void rejectsUnsafeApiKeysBeforeBuildingAuthorizationHeaderWithoutLeakingThem() {
+        server.enqueue(jsonResponse("{\"data\":{\"id\":\"unexpected_request\"}}"));
+        for (String unsafeKey : List.of(
+                "up_test_secret\n",
+                "up_test_secret\u0085value",
+                "up_test_secret-\ud83d\udd10-value"
+        )) {
+            UniPost unsafeClient = UniPost.builder()
+                    .apiKey(unsafeKey)
+                    .baseUrl(server.url("/").toString())
+                    .build();
+
+            IllegalStateException error = assertThrows(
+                    IllegalStateException.class,
+                    () -> unsafeClient.inbox().workspace().reply(
+                            "inbox_1",
+                            Map.of("text", "Reply")
+                    )
+            );
+
+            assertEquals("UniPost Inbox request credentials are invalid.", error.getMessage());
+            assertNull(error.getCause());
+            assertFalse(error.toString().contains(unsafeKey));
+            assertFalse(error.toString().contains("Authorization"));
         }
         assertEquals(0, server.getRequestCount());
     }
