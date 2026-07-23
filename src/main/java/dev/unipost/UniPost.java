@@ -11,7 +11,7 @@ import java.util.Objects;
 public final class UniPost {
     public static final String DEFAULT_BASE_URL = "https://api.unipost.dev";
     public static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(30);
-    public static final String SDK_VERSION = "0.5.0";
+    public static final String SDK_VERSION = "0.6.0";
 
     private final ApiHttpClient http;
 
@@ -32,6 +32,7 @@ public final class UniPost {
     private final OAuthResource oauth;
     private final UsageResource usage;
     private final LogsResource logs;
+    private final Inbox inbox;
 
     public UniPost() {
         this(builder());
@@ -69,6 +70,7 @@ public final class UniPost {
         this.oauth = new OAuthResource(http);
         this.usage = new UsageResource(http);
         this.logs = new LogsResource(http);
+        this.inbox = new Inbox(http);
     }
 
     public static Builder builder() {
@@ -92,6 +94,7 @@ public final class UniPost {
     public OAuthResource oauth() { return oauth; }
     public UsageResource usage() { return usage; }
     public LogsResource logs() { return logs; }
+    public Inbox inbox() { return inbox; }
 
     public static final class Builder {
         private String apiKey;
