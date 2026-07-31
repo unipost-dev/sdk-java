@@ -37,5 +37,6 @@ class UniPostTest {
         assertNotNull(client.platformCredentials());
         assertNotNull(client.deliveryJobs());
         assertNotNull(client.logs());
+        assertNotNull(client.billing());
     }
 }

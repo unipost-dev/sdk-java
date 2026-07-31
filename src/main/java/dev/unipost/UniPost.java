@@ -4,6 +4,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 
 import java.net.http.HttpClient;
 import java.time.Duration;
+import java.time.OffsetDateTime;
+import java.time.format.DateTimeParseException;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -31,6 +34,7 @@ public final class UniPost {
     private final WebhooksResource webhooks;
     private final OAuthResource oauth;
     private final UsageResource usage;
+    private final BillingResource billing;
     private final LogsResource logs;
     private final Inbox inbox;
 
@@ -69,6 +73,7 @@ public final class UniPost {
         this.webhooks = new WebhooksResource(http);
         this.oauth = new OAuthResource(http);
         this.usage = new UsageResource(http);
+        this.billing = new BillingResource(http);
         this.logs = new LogsResource(http);
         this.inbox = new Inbox(http);
     }
@@ -93,6 +98,7 @@ public final class UniPost {
     public WebhooksResource webhooks() { return webhooks; }
     public OAuthResource oauth() { return oauth; }
     public UsageResource usage() { return usage; }
+    public BillingResource billing() { return billing; }
     public LogsResource logs() { return logs; }
     public Inbox inbox() { return inbox; }
 
@@ -225,6 +231,57 @@ public final class UniPost {
 
         public JsonNode facebookPageInsights(String accountId) {
             return data(http.get("/v1/accounts/" + accountId + "/facebook/page-insights"));
+        }
+
+        public JsonNode profile(String accountId, Map<String, ?> params) {
+            requireNonBlank("accountId", accountId);
+            Map<String, Object> query = accountReadQuery(params, false);
+            String idempotencyKey = requireNonBlank(
+                    "idempotency_key",
+                    value(params, "idempotency_key")
+            );
+            return http.getPreservingRawErrorCode(
+                    "/v1/accounts/" + accountId + "/profile",
+                    query,
+                    Map.of("Idempotency-Key", idempotencyKey)
+            );
+        }
+
+        public JsonNode listPosts(String accountId, Map<String, ?> params) {
+            requireNonBlank("accountId", accountId);
+            Map<String, Object> query = accountReadQuery(params, true);
+            String idempotencyKey = requireNonBlank(
+                    "idempotency_key",
+                    value(params, "idempotency_key")
+            );
+            return http.getPreservingRawErrorCode(
+                    "/v1/accounts/" + accountId + "/posts",
+                    query,
+                    Map.of("Idempotency-Key", idempotencyKey)
+            );
+        }
+
+        private static Map<String, Object> accountReadQuery(Map<String, ?> params, boolean posts) {
+            String externalUserId = requireNonBlank(
+                    "external_user_id",
+                    value(params, "external_user_id")
+            );
+            Map<String, Object> query = new LinkedHashMap<>();
+            query.put("external_user_id", externalUserId);
+            if (!posts) return query;
+
+            int limit = requireInteger(params == null ? null : params.get("limit"), "limit");
+            if (limit < 5 || limit > 100) {
+                throw new IllegalArgumentException("limit must be an integer between 5 and 100");
+            }
+            query.put("limit", limit);
+            copyIfPresent(params, query, "cursor");
+            copyIfPresent(params, query, "start_time");
+            copyIfPresent(params, query, "end_time");
+            copyIfPresent(params, query, "exclude_reposts");
+            copyIfPresent(params, query, "exclude_replies_to_others");
+            validateTimeRange(query.get("start_time"), query.get("end_time"));
+            return query;
         }
     }
 
@@ -540,6 +597,46 @@ public final class UniPost {
         }
     }
 
+    public static final class BillingResource extends Resource {
+        BillingResource(ApiHttpClient http) { super(http); }
+
+        public JsonNode getXCredits() {
+            return http.getPreservingRawErrorCode(
+                    "/v1/billing/x-credits",
+                    Map.of(),
+                    Map.of()
+            );
+        }
+
+        public JsonNode listXCreditEvents() {
+            return listXCreditEvents(null);
+        }
+
+        public JsonNode listXCreditEvents(Map<String, ?> params) {
+            Map<String, Object> query = new LinkedHashMap<>();
+            copyIfPresent(params, query, "account_id");
+            copyIfPresent(params, query, "external_user_id");
+            copyIfPresent(params, query, "operation");
+            copyIfPresent(params, query, "status");
+            copyIfPresent(params, query, "start_time");
+            copyIfPresent(params, query, "end_time");
+            copyIfPresent(params, query, "cursor");
+            if (params != null && params.get("limit") != null) {
+                int limit = requireInteger(params.get("limit"), "limit");
+                if (limit < 1 || limit > 100) {
+                    throw new IllegalArgumentException("limit must be an integer between 1 and 100");
+                }
+                query.put("limit", limit);
+            }
+            validateTimeRange(query.get("start_time"), query.get("end_time"));
+            return http.getPreservingRawErrorCode(
+                    "/v1/billing/x-credits/events",
+                    query,
+                    Map.of()
+            );
+        }
+    }
+
     public static final class LogsResource extends Resource {
         LogsResource(ApiHttpClient http) { super(http); }
 
@@ -561,6 +658,64 @@ public final class UniPost {
 
         public LogStream stream(Map<String, ?> params) {
             return new LogStream(http.stream("/v1/logs/stream", params, Map.of()));
+        }
+    }
+
+    private static String value(Map<String, ?> params, String name) {
+        if (params == null || params.get(name) == null) return null;
+        return String.valueOf(params.get(name));
+    }
+
+    private static String requireNonBlank(String name, String value) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException(name + " is required");
+        }
+        return value;
+    }
+
+    private static int requireInteger(Object value, String name) {
+        if (value instanceof Byte || value instanceof Short || value instanceof Integer) {
+            return ((Number) value).intValue();
+        }
+        if (value instanceof Long) {
+            long parsed = (Long) value;
+            if (parsed >= Integer.MIN_VALUE && parsed <= Integer.MAX_VALUE) {
+                return (int) parsed;
+            }
+        }
+        throw new IllegalArgumentException(name + " must be an integer");
+    }
+
+    private static void copyIfPresent(
+            Map<String, ?> source,
+            Map<String, Object> destination,
+            String name
+    ) {
+        if (source != null && source.get(name) != null) {
+            destination.put(name, source.get(name));
+        }
+    }
+
+    private static void validateTimeRange(Object startValue, Object endValue) {
+        OffsetDateTime start = parseTimestamp(startValue, "start_time");
+        OffsetDateTime end = parseTimestamp(endValue, "end_time");
+        if (start != null && end != null && !end.toInstant().isAfter(start.toInstant())) {
+            throw new IllegalArgumentException("end_time must be after start_time");
+        }
+    }
+
+    private static OffsetDateTime parseTimestamp(Object value, String name) {
+        if (value == null) return null;
+        if (!(value instanceof String) || ((String) value).isBlank()) {
+            throw new IllegalArgumentException(name + " must be a valid RFC 3339 timestamp");
+        }
+        try {
+            return OffsetDateTime.parse((String) value);
+        } catch (DateTimeParseException error) {
+            throw new IllegalArgumentException(
+                    name + " must be a valid RFC 3339 timestamp",
+                    error
+            );
         }
     }
 }

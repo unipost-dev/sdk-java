@@ -56,6 +56,113 @@ class ResourceRequestTest {
     }
 
     @Test
+    void readsXAccountProfileWithIdempotencyAndReturnsFullEnvelope() throws Exception {
+        server.enqueue(jsonResponse("{\"data\":{\"account_id\":\"sa_x_123\",\"external_user_id\":\"user_42\"},"
+                + "\"meta\":{\"credits\":{\"charged\":10}},\"request_id\":\"req_profile_1\"}"));
+
+        JsonNode result = client.accounts().profile("sa_x_123", Map.of(
+                "external_user_id", "user_42",
+                "idempotency_key", "profile-user-42"
+        ));
+
+        assertEquals("sa_x_123", result.path("data").path("account_id").asText());
+        assertEquals(10, result.path("meta").path("credits").path("charged").asInt());
+        assertEquals("req_profile_1", result.path("request_id").asText());
+        RecordedRequest request = server.takeRequest();
+        assertEquals("GET", request.getMethod());
+        assertEquals("/v1/accounts/sa_x_123/profile?external_user_id=user_42", request.getPath());
+        assertEquals("profile-user-42", request.getHeader("Idempotency-Key"));
+        assertFalse(request.getPath().contains("idempotency_key"));
+    }
+
+    @Test
+    void listsXAccountPostsWithFiltersAndReturnsFullEnvelope() throws Exception {
+        server.enqueue(jsonResponse("{\"data\":[{\"external_post_id\":\"1819\"}],"
+                + "\"meta\":{\"next_cursor\":\"xc_next\",\"credits\":{\"charged\":20}},"
+                + "\"request_id\":\"req_posts_1\"}"));
+
+        JsonNode result = client.accounts().listPosts("sa_x_123", Map.of(
+                "external_user_id", "user_42",
+                "idempotency_key", "posts-user-42-page-1",
+                "limit", 20,
+                "cursor", "xc_current",
+                "start_time", "2026-07-01T00:00:00Z",
+                "end_time", "2026-08-01T00:00:00Z",
+                "exclude_reposts", true,
+                "exclude_replies_to_others", true
+        ));
+
+        assertEquals("1819", result.path("data").get(0).path("external_post_id").asText());
+        assertEquals("xc_next", result.path("meta").path("next_cursor").asText());
+        assertEquals("req_posts_1", result.path("request_id").asText());
+        RecordedRequest request = server.takeRequest();
+        assertEquals("GET", request.getMethod());
+        assertTrue(request.getPath().startsWith("/v1/accounts/sa_x_123/posts?"));
+        assertTrue(request.getPath().contains("external_user_id=user_42"));
+        assertTrue(request.getPath().contains("limit=20"));
+        assertTrue(request.getPath().contains("cursor=xc_current"));
+        assertTrue(request.getPath().contains("start_time=2026-07-01T00%3A00%3A00Z"));
+        assertTrue(request.getPath().contains("end_time=2026-08-01T00%3A00%3A00Z"));
+        assertTrue(request.getPath().contains("exclude_reposts=true"));
+        assertTrue(request.getPath().contains("exclude_replies_to_others=true"));
+        assertEquals("posts-user-42-page-1", request.getHeader("Idempotency-Key"));
+        assertFalse(request.getPath().contains("idempotency_key"));
+    }
+
+    @Test
+    void validatesXAccountReadInputsBeforeRequesting() {
+        assertThrows(IllegalArgumentException.class, () -> client.accounts().profile("", Map.of(
+                "external_user_id", "user_42",
+                "idempotency_key", "profile-key"
+        )));
+        assertThrows(IllegalArgumentException.class, () -> client.accounts().profile("sa_x_123", Map.of(
+                "external_user_id", " ",
+                "idempotency_key", "profile-key"
+        )));
+        assertThrows(IllegalArgumentException.class, () -> client.accounts().listPosts("sa_x_123", Map.of(
+                "external_user_id", "user_42",
+                "idempotency_key", "posts-key",
+                "limit", 4
+        )));
+        assertThrows(IllegalArgumentException.class, () -> client.accounts().listPosts("sa_x_123", Map.of(
+                "external_user_id", "user_42",
+                "idempotency_key", "posts-key",
+                "limit", 20,
+                "start_time", "2026-08-01T00:00:00Z",
+                "end_time", "2026-08-01T00:00:00Z"
+        )));
+        assertEquals(0, server.getRequestCount());
+    }
+
+    @Test
+    void readsXCreditsAndEventsAsFullEnvelopes() throws Exception {
+        server.enqueue(jsonResponse("{\"data\":{\"monthly_remaining\":9800},\"request_id\":\"req_allowance_1\"}"));
+        server.enqueue(jsonResponse("{\"data\":[{\"operation_id\":\"xread_posts_1\"}],"
+                + "\"meta\":{\"next_cursor\":\"events_next\"},\"request_id\":\"req_events_1\"}"));
+
+        JsonNode allowance = client.billing().getXCredits();
+        JsonNode events = client.billing().listXCreditEvents(Map.of(
+                "account_id", "sa_x_123",
+                "operation", "post.read",
+                "start_time", "2026-07-01T00:00:00Z",
+                "end_time", "2026-08-01T00:00:00Z",
+                "limit", 50
+        ));
+
+        assertEquals(9800, allowance.path("data").path("monthly_remaining").asInt());
+        assertEquals("req_allowance_1", allowance.path("request_id").asText());
+        assertEquals("xread_posts_1", events.path("data").get(0).path("operation_id").asText());
+        assertEquals("events_next", events.path("meta").path("next_cursor").asText());
+        RecordedRequest allowanceRequest = server.takeRequest();
+        RecordedRequest eventsRequest = server.takeRequest();
+        assertEquals("/v1/billing/x-credits", allowanceRequest.getPath());
+        assertTrue(eventsRequest.getPath().startsWith("/v1/billing/x-credits/events?"));
+        assertTrue(eventsRequest.getPath().contains("account_id=sa_x_123"));
+        assertTrue(eventsRequest.getPath().contains("operation=post.read"));
+        assertTrue(eventsRequest.getPath().contains("limit=50"));
+    }
+
+    @Test
     void createsPostsAtV1Posts() throws Exception {
         server.enqueue(jsonResponse("{\"data\":{\"id\":\"post_1\",\"caption\":\"Hello!\"}}"));
 

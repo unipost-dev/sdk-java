@@ -53,6 +53,18 @@ final class ApiHttpClient {
         return send("GET", path, query, null, Collections.emptyMap());
     }
 
+    JsonNode get(String path, Map<String, ?> query, Map<String, String> extraHeaders) {
+        return send("GET", path, query, null, extraHeaders);
+    }
+
+    JsonNode getPreservingRawErrorCode(
+            String path,
+            Map<String, ?> query,
+            Map<String, String> extraHeaders
+    ) {
+        return send("GET", path, query, null, extraHeaders, true);
+    }
+
     JsonNode getInbox(String path, Map<String, ?> query) {
         validateInboxApiKey();
         return get(path, query);
@@ -245,6 +257,17 @@ final class ApiHttpClient {
     }
 
     JsonNode send(String method, String path, Map<String, ?> query, Object body, Map<String, String> extraHeaders) {
+        return send(method, path, query, body, extraHeaders, false);
+    }
+
+    private JsonNode send(
+            String method,
+            String path,
+            Map<String, ?> query,
+            Object body,
+            Map<String, String> extraHeaders,
+            boolean preserveRawErrorCode
+    ) {
         try {
             HttpRequest.Builder builder = HttpRequest.newBuilder()
                     .uri(URI.create(baseUrl + path + buildQuery(query)))
@@ -273,7 +296,9 @@ final class ApiHttpClient {
             JsonNode json = raw.isBlank() ? MAPPER.nullNode() : MAPPER.readTree(raw);
 
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                throw apiError(response.statusCode(), response.headers(), raw, json);
+                throw preserveRawErrorCode
+                        ? inboxApiError(response.statusCode(), response.headers(), raw, json)
+                        : apiError(response.statusCode(), response.headers(), raw, json);
             }
 
             return json;
@@ -394,23 +419,98 @@ final class ApiHttpClient {
     }
 
     private static APIError apiError(int statusCode, HttpHeaders headers, String raw, JsonNode json) {
-        String requestId = headers.firstValue("X-Request-Id").orElse(null);
+        String requestId = requestId(headers, json);
         String code = textAt(json, "error.normalized_code");
         if (code == null) code = textAt(json, "error.code");
         if (code == null) code = textAt(json, "code");
         String message = textAt(json, "error.message");
         if (message == null) message = textAt(json, "message");
-        return new APIError(statusCode, code, message, requestId, raw);
+        return structuredApiError(statusCode, headers, raw, json, requestId, code, message);
     }
 
     private static APIError inboxApiError(int statusCode, HttpHeaders headers, String raw, JsonNode json) {
-        String requestId = headers.firstValue("X-Request-Id").orElse(null);
+        String requestId = requestId(headers, json);
         String code = textAt(json, "error.code");
         if (code == null) code = textAt(json, "error.normalized_code");
         if (code == null) code = textAt(json, "code");
         String message = textAt(json, "error.message");
         if (message == null) message = textAt(json, "message");
-        return new APIError(statusCode, code, message, requestId, raw);
+        return structuredApiError(statusCode, headers, raw, json, requestId, code, message);
+    }
+
+    private static APIError structuredApiError(
+            int statusCode,
+            HttpHeaders headers,
+            String raw,
+            JsonNode json,
+            String requestId,
+            String code,
+            String message
+    ) {
+        JsonNode details = nodeAt(json, "error.details");
+        Boolean retriable = booleanAt(json, "error.is_retriable");
+        Integer retryAfter = positiveIntegerHeader(headers, "Retry-After");
+        if (retryAfter == null) {
+            retryAfter = positiveIntegerAt(json, "error.retry_after");
+        }
+        return new APIError(
+                statusCode,
+                code,
+                message,
+                requestId,
+                raw,
+                details,
+                retriable,
+                retryAfter
+        );
+    }
+
+    private static String requestId(HttpHeaders headers, JsonNode json) {
+        String requestId = headers.firstValue("X-Request-Id").orElse(null);
+        if (requestId == null) requestId = textAt(json, "request_id");
+        if (requestId == null) requestId = textAt(json, "error.request_id");
+        return requestId;
+    }
+
+    private static Integer positiveIntegerHeader(HttpHeaders headers, String name) {
+        String value = headers.firstValue(name).orElse(null);
+        if (value == null) return null;
+        try {
+            int parsed = Integer.parseInt(value.trim());
+            return parsed > 0 ? parsed : null;
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
+    }
+
+    private static Integer positiveIntegerAt(JsonNode root, String dottedPath) {
+        JsonNode node = nodeAt(root, dottedPath);
+        if (node == null || node.isNull()) return null;
+        try {
+            int parsed = Integer.parseInt(node.asText());
+            return parsed > 0 ? parsed : null;
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
+    }
+
+    private static Boolean booleanAt(JsonNode root, String dottedPath) {
+        JsonNode node = nodeAt(root, dottedPath);
+        if (node == null || node.isNull()) return null;
+        if (node.isBoolean()) return node.booleanValue();
+        if ("true".equalsIgnoreCase(node.asText())) return true;
+        if ("false".equalsIgnoreCase(node.asText())) return false;
+        return null;
+    }
+
+    private static JsonNode nodeAt(JsonNode root, String dottedPath) {
+        if (root == null) return null;
+        JsonNode node = root;
+        for (String part : dottedPath.split("\\.")) {
+            node = node.get(part);
+            if (node == null) return null;
+        }
+        return node.isNull() ? null : node;
     }
 
     private void validateInboxApiKey() {
@@ -423,13 +523,8 @@ final class ApiHttpClient {
     }
 
     private static String textAt(JsonNode root, String dottedPath) {
-        if (root == null) return null;
-        JsonNode node = root;
-        for (String part : dottedPath.split("\\.")) {
-            node = node.get(part);
-            if (node == null) return null;
-        }
-        return node.isNull() ? null : node.asText();
+        JsonNode node = nodeAt(root, dottedPath);
+        return node == null ? null : node.asText();
     }
 
     static Map<String, Object> linkedMap() {
