@@ -179,7 +179,7 @@ class InboxTest {
         assertEquals(2, request.getRequestUrl().querySize());
         assertEquals("idem-exact-value", request.getHeader("Idempotency-Key"));
         assertEquals("Bearer " + "up_test_inbox", request.getHeader("Authorization"));
-        assertEquals("unipost-java/0.6.0", request.getHeader("User-Agent"));
+        assertEquals("unipost-java/0.7.0", request.getHeader("User-Agent"));
         assertEquals("application/json", request.getHeader("Content-Type"));
         assertEquals(
                 Map.of("text", "Thanks for reaching out!"),
@@ -568,7 +568,7 @@ class InboxTest {
 
     @Test
     void releaseVersionAndDefaultTransportUserAgentStayInSync() throws Exception {
-        assertEquals("0.6.0", UniPost.SDK_VERSION);
+        assertEquals("0.7.0", UniPost.SDK_VERSION);
         server.enqueue(jsonResponse("{\"data\":{\"count\":1}}"));
         ApiHttpClient http = new ApiHttpClient(
                 "up_test_inbox",
@@ -578,7 +578,7 @@ class InboxTest {
 
         http.get("/v1/version-check");
 
-        assertEquals("unipost-java/0.6.0", server.takeRequest().getHeader("User-Agent"));
+        assertEquals("unipost-java/0.7.0", server.takeRequest().getHeader("User-Agent"));
     }
 
     @Test

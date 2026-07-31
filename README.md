@@ -2,7 +2,7 @@
 
 Official Java client for the UniPost API.
 
-## Latest release: v0.6.0
+## Latest release: v0.7.0
 
 Inbox operations are now explicitly bound to either one managed user or the
 owner/admin workspace aggregate.
@@ -19,14 +19,14 @@ Maven:
 <dependency>
   <groupId>dev.unipost</groupId>
   <artifactId>sdk-java</artifactId>
-  <version>0.6.0</version>
+  <version>0.7.0</version>
 </dependency>
 ```
 
 Gradle:
 
 ```kotlin
-implementation("dev.unipost:sdk-java:0.6.0")
+implementation("dev.unipost:sdk-java:0.7.0")
 ```
 
 ## Quickstart
